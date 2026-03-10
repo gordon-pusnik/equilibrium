@@ -340,10 +340,10 @@ System Architecture
 
 The Trainer ecosystem is powered by the Equilibrium strategy engine, which can be accessed through multiple interfaces including mobile applications, command-line tools, and a REST API.
 
+```mermaid
 flowchart TD
 
 A[Equilibrium C++ Engine]
-
 B[Strategy Solver]
 C[Hand Evaluator]
 D[Monte Carlo Simulation]
@@ -366,6 +366,7 @@ E --> G
 
 F --> H
 F --> I
+```
 
 The Equilibrium engine provides the core functionality used by:
 
