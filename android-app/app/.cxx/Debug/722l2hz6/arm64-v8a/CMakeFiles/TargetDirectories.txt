@@ -1,0 +1,3 @@
+C:/Users/gordo/Projects/Personal/New/github/videopoker-cl/android-app/app/.cxx/Debug/722l2hz6/arm64-v8a/CMakeFiles/videopoker_native.dir
+C:/Users/gordo/Projects/Personal/New/github/videopoker-cl/android-app/app/.cxx/Debug/722l2hz6/arm64-v8a/CMakeFiles/edit_cache.dir
+C:/Users/gordo/Projects/Personal/New/github/videopoker-cl/android-app/app/.cxx/Debug/722l2hz6/arm64-v8a/CMakeFiles/rebuild_cache.dir
