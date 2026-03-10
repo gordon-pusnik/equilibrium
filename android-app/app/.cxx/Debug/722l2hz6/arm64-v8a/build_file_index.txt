@@ -1,1 +1,0 @@
-C:\Users\gordo\Projects\Personal\New\github\videopoker-cl\android-app\app\src\main\cpp\CMakeLists.txt
