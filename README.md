@@ -1,6 +1,15 @@
 # Equilibrium
 
-A high-performance, multi-platform poker training suite built on **Equilibrium**, a C++ strategy solver designed to compute mathematically optimal play using exhaustive expected value analysis and simulation.
+![C++](https://img.shields.io/badge/C%2B%2B-17-blue)
+![Python](https://img.shields.io/badge/Python-3.x-yellow)
+![FastAPI](https://img.shields.io/badge/API-FastAPI-green)
+![Docker](https://img.shields.io/badge/Container-Docker-blue)
+![iOS](https://img.shields.io/badge/iOS-SwiftUI-black)
+![Android](https://img.shields.io/badge/Android-Kotlin-brightgreen)
+![Solver](https://img.shields.io/badge/Strategy-EV%20Solver-orange)
+![ML](https://img.shields.io/badge/MachineLearning-MLP-purple)
+
+A high-performance, multi-platform training suite built on **Equilibrium**, a C++ strategy solver designed to compute mathematically optimal play using exhaustive expected value analysis and simulation.
 
 The project includes:
 
