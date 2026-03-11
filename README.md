@@ -383,9 +383,6 @@ machine learning training pipelines
 # Author
 
 Gordon Pusnik
-Senior Software Engineer
-
-Orion demonstrates the design of a portable real-time 3D engine capable of powering space simulation environments across desktop and mobile platforms.
 
 ---
 
