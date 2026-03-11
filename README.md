@@ -135,6 +135,12 @@ Both mobile apps use the **same C++ strategy engine**, ensuring identical optima
 
 ---
 
+# Windows Desktop Trainer
+
+The `csharp-app/` project adds a Windows Forms interface for anyone who wants desktop access to the solver. Enter any five-card hand, and the client calls the FastAPI `/v1/video-poker/strategy` and `/v1/poker/evaluate` endpoints to display the recommended holds, EV per coin, and the current hand rank—no mobile build required.
+
+---
+
 # Mobile Trainer Features
 
 The mobile trainers provide an interactive learning environment.
@@ -316,6 +322,7 @@ poker-core/
 
 android-app/  Android trainer application
 ios-app/      iOS trainer application
+csharp-app/   Windows desktop trainer application
 api-server/   FastAPI microservice
 resources/    Graphical assets
 ```

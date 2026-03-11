@@ -12,3 +12,13 @@ DerivedData/
 .cxx
 Debug/
 .idea
+
+# Visual Studio / C# artifacts
+.vs/
+*.user
+*.suo
+*.userprefs
+*.csproj.user
+*.vcxproj.user
+csharp-app/bin/
+csharp-app/obj/
