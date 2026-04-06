@@ -5,7 +5,6 @@ NS_ASSUME_NONNULL_BEGIN
 @interface PokerEngineBridge : NSObject
 
 - (instancetype)initWithSeed:(uint64_t)seed;
-- (void)dealloc;
 
 - (BOOL)setEngine:(NSString *)engineName error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)loadMlModel:(NSString *)path error:(NSError * _Nullable * _Nullable)error;

@@ -49,6 +49,9 @@
         vp_destroy(_handle);
         _handle = nullptr;
     }
+#if !__has_feature(objc_arc)
+    [super dealloc];
+#endif
 }
 
 - (BOOL)setEngine:(NSString *)engineName error:(NSError * _Nullable * _Nullable)error {

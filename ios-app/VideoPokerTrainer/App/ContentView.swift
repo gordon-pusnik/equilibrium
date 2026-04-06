@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct UiCard: Identifiable {
     let id = UUID()
@@ -114,19 +115,18 @@ struct ContentView: View {
     }
 
     private func prepareEngine() -> NSError? {
-        var nsError: NSError?
-        if !bridge.setEngine(engine, error: &nsError) {
-            return nsError ?? NSError(domain: "PokerEngine", code: 2)
-        }
-        if engine == "ml" {
-            if mlModelPath.isEmpty {
-                return NSError(domain: "PokerEngine", code: 3, userInfo: [NSLocalizedDescriptionKey: "Please provide ML model path"])
+        do {
+            try bridge.setEngine(engine)
+            if engine == "ml" {
+                if mlModelPath.isEmpty {
+                    return NSError(domain: "PokerEngine", code: 3, userInfo: [NSLocalizedDescriptionKey: "Please provide ML model path"])
+                }
+                try bridge.loadMlModel(mlModelPath)
             }
-            if !bridge.loadMlModel(mlModelPath, error: &nsError) {
-                return nsError ?? NSError(domain: "PokerEngine", code: 4)
-            }
+            return nil
+        } catch {
+            return error as NSError
         }
-        return nil
     }
 
     private func dealSuggested() {
@@ -136,17 +136,19 @@ struct ContentView: View {
             return
         }
 
-        var nsError: NSError?
-        guard let hand = bridge.dealSuggested(withBet: bet, error: &nsError) else {
-            errorText = nsError?.localizedDescription ?? "Failed to deal hand"
+        let handData: [AnyHashable: Any]
+        do {
+            handData = try bridge.dealSuggested(withBet: bet)
+        } catch {
+            errorText = (error as NSError).localizedDescription
             return
         }
 
         payout = 0
         canDraw = true
-        suggestedMask = hand["holdMask"] as? Int ?? 0
+        suggestedMask = handData["holdMask"] as? Int ?? 0
 
-        let initial = hand["initial"] as? [[String: Any]] ?? []
+        let initial = handData["initial"] as? [[String: Any]] ?? []
         initialCards = initial.map {
             UiCard(
                 suit: $0["s"] as? Int ?? 1,
@@ -165,16 +167,18 @@ struct ContentView: View {
             return card.held ? (acc | (1 << idx)) : acc
         }
 
-        var nsError: NSError?
-        guard let hand = bridge.draw(withBet: bet, holdMask: mask, error: &nsError) else {
-            errorText = nsError?.localizedDescription ?? "Failed to draw"
+        let handData: [AnyHashable: Any]
+        do {
+            handData = try bridge.draw(withBet: bet, holdMask: UInt(mask))
+        } catch {
+            errorText = (error as NSError).localizedDescription
             return
         }
 
         canDraw = false
-        payout = hand["payout"] as? Int ?? 0
+        payout = handData["payout"] as? Int ?? 0
 
-        let initial = hand["initial"] as? [[String: Any]] ?? []
+        let initial = handData["initial"] as? [[String: Any]] ?? []
         initialCards = initial.map {
             UiCard(
                 suit: $0["s"] as? Int ?? 1,
@@ -184,7 +188,7 @@ struct ContentView: View {
             )
         }
 
-        let final = hand["final"] as? [[String: Any]] ?? []
+        let final = handData["final"] as? [[String: Any]] ?? []
         finalCards = final.map {
             UiCard(
                 suit: $0["s"] as? Int ?? 1,
@@ -206,9 +210,7 @@ struct CardRow: View {
         HStack(spacing: 8) {
             ForEach(Array(cards.enumerated()), id: \.element.id) { idx, card in
                 ZStack {
-                    Image(cardImageName(suit: card.suit, rank: card.rank))
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
+                    cardImage(suit: card.suit, rank: card.rank)
                         .background(card.winning ? Color.yellow.opacity(0.1) : Color.white)
                         .cornerRadius(8)
                         .shadow(radius: 1)
@@ -286,6 +288,19 @@ struct CardRow: View {
         default: s = ""
         }
         return "\(r)_\(s)"
+    }
+
+    private func cardImage(suit: Int, rank: Int) -> some View {
+        let imageName = cardImageName(suit: suit, rank: rank)
+        let uiImage = UIImage(
+            contentsOfFile: Bundle.main.path(forResource: imageName, ofType: "png", inDirectory: "cards") ?? ""
+        ) ?? UIImage(
+            contentsOfFile: Bundle.main.path(forResource: "card_back", ofType: "png", inDirectory: "cards") ?? ""
+        ) ?? UIImage()
+
+        return Image(uiImage: uiImage)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
     }
 
     private func strokeColor(index: Int, card: UiCard) -> Color {
