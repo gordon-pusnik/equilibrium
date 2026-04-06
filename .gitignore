@@ -12,6 +12,7 @@ DerivedData/
 .cxx
 Debug/
 .idea
+.DS_Store
 
 # Visual Studio / C# artifacts
 .vs/
