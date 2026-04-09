@@ -24,3 +24,6 @@ machine-learning/
 *.vcxproj.user
 csharp-app/bin/
 csharp-app/obj/
+
+# XCode
+project.xcworkspace/
