@@ -94,3 +94,113 @@ Java_com_example_videopoker_NativeBridge_nativeDrawWithMask(JNIEnv* env, jobject
     }
     return toJIntArray(env, state);
 }
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_example_videopoker_NativeBridge_nativeCalculateHoldMask(
+    JNIEnv* env,
+    jobject,
+    jlong handle,
+    jint bet,
+    jintArray suits,
+    jintArray ranks
+) {
+    if (env->GetArrayLength(suits) < 5 || env->GetArrayLength(ranks) < 5) {
+        return -1;
+    }
+
+    jint suit_values[5];
+    jint rank_values[5];
+    env->GetIntArrayRegion(suits, 0, 5, suit_values);
+    env->GetIntArrayRegion(ranks, 0, 5, rank_values);
+
+    uint32_t c_suits[5];
+    uint32_t c_ranks[5];
+    for (int i = 0; i < 5; ++i) {
+        c_suits[i] = static_cast<uint32_t>(suit_values[i]);
+        c_ranks[i] = static_cast<uint32_t>(rank_values[i]);
+    }
+
+    uint32_t out_mask = 0;
+    vp_calculate_optimal_play(
+        reinterpret_cast<VPHandle>(handle),
+        static_cast<uint32_t>(bet),
+        c_suits,
+        c_ranks,
+        &out_mask
+    );
+    return static_cast<jint>(out_mask);
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_com_example_videopoker_NativeBridge_nativeExplainHold(
+    JNIEnv* env,
+    jobject,
+    jintArray suits,
+    jintArray ranks,
+    jint holdMask
+) {
+    if (env->GetArrayLength(suits) < 5 || env->GetArrayLength(ranks) < 5) {
+        return nullptr;
+    }
+
+    jint suit_values[5];
+    jint rank_values[5];
+    env->GetIntArrayRegion(suits, 0, 5, suit_values);
+    env->GetIntArrayRegion(ranks, 0, 5, rank_values);
+
+    uint32_t c_suits[5];
+    uint32_t c_ranks[5];
+    for (int i = 0; i < 5; ++i) {
+        c_suits[i] = static_cast<uint32_t>(suit_values[i]);
+        c_ranks[i] = static_cast<uint32_t>(rank_values[i]);
+    }
+
+    VPHoldExplanation explanation = {};
+    vp_explain_hold(c_suits, c_ranks, static_cast<uint32_t>(holdMask), &explanation);
+
+    jclass string_class = env->FindClass("java/lang/String");
+    jobjectArray result = env->NewObjectArray(2, string_class, nullptr);
+    env->SetObjectArrayElement(result, 0, env->NewStringUTF(explanation.label));
+    env->SetObjectArrayElement(result, 1, env->NewStringUTF(explanation.summary));
+    return result;
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_com_example_videopoker_NativeBridge_nativeAnalyzeSolver(
+    JNIEnv* env,
+    jobject,
+    jintArray suits,
+    jintArray ranks,
+    jint bet
+) {
+    if (env->GetArrayLength(suits) < 5 || env->GetArrayLength(ranks) < 5) {
+        return nullptr;
+    }
+
+    jint suit_values[5];
+    jint rank_values[5];
+    env->GetIntArrayRegion(suits, 0, 5, suit_values);
+    env->GetIntArrayRegion(ranks, 0, 5, rank_values);
+
+    uint32_t c_suits[5];
+    uint32_t c_ranks[5];
+    for (int i = 0; i < 5; ++i) {
+        c_suits[i] = static_cast<uint32_t>(suit_values[i]);
+        c_ranks[i] = static_cast<uint32_t>(rank_values[i]);
+    }
+
+    VPSolverAnalysis analysis = {};
+    if (vp_analyze_solver(c_suits, c_ranks, static_cast<uint32_t>(bet), &analysis) != 1) {
+        return nullptr;
+    }
+
+    jdouble values[4] = {
+        static_cast<jdouble>(analysis.best_mask),
+        static_cast<jdouble>(analysis.second_mask),
+        analysis.best_ev,
+        analysis.second_ev
+    };
+    jdoubleArray result = env->NewDoubleArray(4);
+    env->SetDoubleArrayRegion(result, 0, 4, values);
+    return result;
+}

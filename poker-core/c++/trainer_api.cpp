@@ -240,3 +240,51 @@ void vp_evaluate_hand(const uint32_t* suits, const uint32_t* ranks, VPEvaluation
     out_eval->hand_name[sizeof(out_eval->hand_name) - 1] = '\0';
     out_eval->rank_value = result.rank_value;
 }
+
+void vp_explain_hold(const uint32_t* suits, const uint32_t* ranks, uint32_t hold_mask, VPHoldExplanation* out_explanation) {
+    if (!out_explanation) return;
+
+    std::array<Card, 5> card_objs = {
+        Card(suits[0], ranks[0]),
+        Card(suits[1], ranks[1]),
+        Card(suits[2], ranks[2]),
+        Card(suits[3], ranks[3]),
+        Card(suits[4], ranks[4])
+    };
+    std::array<Card*, 5> card_ptrs = {&card_objs[0], &card_objs[1], &card_objs[2], &card_objs[3], &card_objs[4]};
+
+    const std::string label = AutoHold::explain_hold_label(card_ptrs, hold_mask);
+    const std::string summary = AutoHold::explain_hold_summary(card_ptrs, hold_mask);
+
+    std::strncpy(out_explanation->label, label.c_str(), sizeof(out_explanation->label) - 1);
+    out_explanation->label[sizeof(out_explanation->label) - 1] = '\0';
+    std::strncpy(out_explanation->summary, summary.c_str(), sizeof(out_explanation->summary) - 1);
+    out_explanation->summary[sizeof(out_explanation->summary) - 1] = '\0';
+}
+
+int vp_analyze_solver(const uint32_t* suits, const uint32_t* ranks, uint32_t bet, VPSolverAnalysis* out_analysis) {
+    if (!out_analysis) return 0;
+
+    std::array<Card, 5> card_objs = {
+        Card(suits[0], ranks[0]),
+        Card(suits[1], ranks[1]),
+        Card(suits[2], ranks[2]),
+        Card(suits[3], ranks[3]),
+        Card(suits[4], ranks[4])
+    };
+    std::array<Card*, 5> card_ptrs = {&card_objs[0], &card_objs[1], &card_objs[2], &card_objs[3], &card_objs[4]};
+
+    uint32_t best_mask = 0;
+    uint32_t second_mask = 0;
+    double best_ev = 0.0;
+    double second_ev = 0.0;
+    if (!AutoHold::solver_top_two(card_ptrs, bet, best_mask, best_ev, second_mask, second_ev)) {
+        return 0;
+    }
+
+    out_analysis->best_mask = best_mask;
+    out_analysis->second_mask = second_mask;
+    out_analysis->best_ev = best_ev;
+    out_analysis->second_ev = second_ev;
+    return 1;
+}
