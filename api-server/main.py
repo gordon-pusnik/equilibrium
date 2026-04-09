@@ -87,6 +87,19 @@ def load_lib():
 def startup_event():
     load_lib()
 
+@app.get("/")
+async def root():
+    return {
+        "service": "Video Poker API",
+        "status": "ok",
+        "docs": "/docs",
+        "openapi": "/openapi.json",
+        "endpoints": [
+            "/v1/video-poker/strategy",
+            "/v1/poker/evaluate",
+        ],
+    }
+
 def parse_card(card_str: str):
     card_str = card_str.lower().strip()
     if len(card_str) < 2:

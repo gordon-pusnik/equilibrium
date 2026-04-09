@@ -42,6 +42,22 @@ typedef struct VPEvaluation {
 
 void vp_evaluate_hand(const uint32_t* suits, const uint32_t* ranks, VPEvaluation* out_eval);
 
+typedef struct VPHoldExplanation {
+    char label[64];
+    char summary[192];
+} VPHoldExplanation;
+
+void vp_explain_hold(const uint32_t* suits, const uint32_t* ranks, uint32_t hold_mask, VPHoldExplanation* out_explanation);
+
+typedef struct VPSolverAnalysis {
+    uint32_t best_mask;
+    uint32_t second_mask;
+    double best_ev;
+    double second_ev;
+} VPSolverAnalysis;
+
+int vp_analyze_solver(const uint32_t* suits, const uint32_t* ranks, uint32_t bet, VPSolverAnalysis* out_analysis);
+
 #ifdef __cplusplus
 }
 #endif

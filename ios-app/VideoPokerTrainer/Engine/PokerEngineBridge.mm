@@ -142,4 +142,87 @@
     return [self toDictionary:state];
 }
 
+- (BOOL)calculateHoldMaskWithBet:(NSInteger)bet suits:(NSArray<NSNumber *> *)suits ranks:(NSArray<NSNumber *> *)ranks holdMask:(NSUInteger *)holdMask error:(NSError * _Nullable * _Nullable)error {
+    if (_handle == nullptr) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"PokerEngine" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Engine not initialized"}];
+        }
+        return NO;
+    }
+    if (suits.count != 5 || ranks.count != 5) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"PokerEngine" code:7 userInfo:@{NSLocalizedDescriptionKey: @"Exactly five cards are required"}];
+        }
+        return NO;
+    }
+
+    uint32_t cSuits[5];
+    uint32_t cRanks[5];
+    for (NSUInteger i = 0; i < 5; i++) {
+        cSuits[i] = (uint32_t)suits[i].unsignedIntValue;
+        cRanks[i] = (uint32_t)ranks[i].unsignedIntValue;
+    }
+
+    uint32_t outMask = 0;
+    vp_calculate_optimal_play(_handle, (uint32_t)bet, cSuits, cRanks, &outMask);
+    if (holdMask) {
+        *holdMask = (NSUInteger)outMask;
+    }
+    return YES;
+}
+
+- (nullable NSDictionary *)explainHoldWithSuits:(NSArray<NSNumber *> *)suits ranks:(NSArray<NSNumber *> *)ranks holdMask:(NSUInteger)holdMask error:(NSError * _Nullable * _Nullable)error {
+    if (suits.count != 5 || ranks.count != 5) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"PokerEngine" code:7 userInfo:@{NSLocalizedDescriptionKey: @"Exactly five cards are required"}];
+        }
+        return nil;
+    }
+
+    uint32_t cSuits[5];
+    uint32_t cRanks[5];
+    for (NSUInteger i = 0; i < 5; i++) {
+        cSuits[i] = (uint32_t)suits[i].unsignedIntValue;
+        cRanks[i] = (uint32_t)ranks[i].unsignedIntValue;
+    }
+
+    VPHoldExplanation explanation = {};
+    vp_explain_hold(cSuits, cRanks, (uint32_t)holdMask, &explanation);
+    return @{
+        @"label": [NSString stringWithUTF8String:explanation.label],
+        @"summary": [NSString stringWithUTF8String:explanation.summary]
+    };
+}
+
+- (nullable NSDictionary *)analyzeSolverWithBet:(NSInteger)bet suits:(NSArray<NSNumber *> *)suits ranks:(NSArray<NSNumber *> *)ranks error:(NSError * _Nullable * _Nullable)error {
+    if (suits.count != 5 || ranks.count != 5) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"PokerEngine" code:7 userInfo:@{NSLocalizedDescriptionKey: @"Exactly five cards are required"}];
+        }
+        return nil;
+    }
+
+    uint32_t cSuits[5];
+    uint32_t cRanks[5];
+    for (NSUInteger i = 0; i < 5; i++) {
+        cSuits[i] = (uint32_t)suits[i].unsignedIntValue;
+        cRanks[i] = (uint32_t)ranks[i].unsignedIntValue;
+    }
+
+    VPSolverAnalysis analysis = {};
+    if (vp_analyze_solver(cSuits, cRanks, (uint32_t)bet, &analysis) != 1) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"PokerEngine" code:8 userInfo:@{NSLocalizedDescriptionKey: @"Failed to analyze solver EVs"}];
+        }
+        return nil;
+    }
+
+    return @{
+        @"bestMask": @(analysis.best_mask),
+        @"secondMask": @(analysis.second_mask),
+        @"bestEV": @(analysis.best_ev),
+        @"secondEV": @(analysis.second_ev)
+    };
+}
+
 @end

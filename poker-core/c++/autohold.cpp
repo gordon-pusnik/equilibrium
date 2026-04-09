@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -20,12 +21,15 @@ bool g_autohold_verbose = true;
 AutoHold::Engine g_engine = AutoHold::Engine::SOLVER;
 bool g_ml_model_loaded = false;
 uint32_t g_ml_input_size = 0;
-uint32_t g_ml_hidden_size = 0;
+uint32_t g_ml_hidden1_size = 0;
+uint32_t g_ml_hidden2_size = 0;
 uint32_t g_ml_output_size = 0;
 std::vector<float> g_ml_w1;
 std::vector<float> g_ml_b1;
 std::vector<float> g_ml_w2;
 std::vector<float> g_ml_b2;
+std::vector<float> g_ml_w3;
+std::vector<float> g_ml_b3;
 const char* kRuleStrategyTable[] = {
     "Pat Royal Flush",
     "Pat Straight Flush",
@@ -356,6 +360,161 @@ uint32_t mask_rank_score(const std::array<Card*, 5>& cards, uint8_t mask) {
         }
     }
     return score;
+}
+
+std::vector<uint32_t> mask_ranks(const std::array<Card*, 5>& cards, uint8_t mask);
+bool mask_is_4_to_straight_flush(const std::array<Card*, 5>& cards, uint8_t mask);
+bool mask_is_low_pair(const std::array<Card*, 5>& cards, uint8_t mask);
+bool mask_is_4_to_outside_straight(const std::array<Card*, 5>& cards, uint8_t mask);
+bool mask_is_2_suited_high(const std::array<Card*, 5>& cards, uint8_t mask);
+bool mask_is_2_unsuited_high(const std::array<Card*, 5>& cards, uint8_t mask);
+bool select_best_mask(
+    const std::array<Card*, 5>& cards,
+    bool (*predicate)(const std::array<Card*, 5>&, uint8_t),
+    uint8_t& selected_mask
+);
+bool pred_4_to_royal(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_3_to_royal(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_4_to_flush(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_3_to_sf_strong(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_suited_tj(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_suited_qj(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_suited_kq(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_suited_jk(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_suited_ak_aq_aj(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_unsuited_tj(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_unsuited_qj(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_unsuited_kq(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_unsuited_jk(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_suited_at(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_suited_kt(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_suited_qt(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_3_to_sf_medium(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_inside_3_high(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_one_ace(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_one_king(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_one_queen(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_one_jack(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_one_ten(const std::array<Card*, 5>& cards, uint8_t mask);
+
+uint8_t kept_mask_from_win_eval(const std::array<Card*, 5>& cards, uint32_t* out_win_type = nullptr) {
+    std::array<Card, 5> copies = {
+        Card(cards[0]->suit(), cards[0]->rank()),
+        Card(cards[1]->suit(), cards[1]->rank()),
+        Card(cards[2]->suit(), cards[2]->rank()),
+        Card(cards[3]->suit(), cards[3]->rank()),
+        Card(cards[4]->suit(), cards[4]->rank())
+    };
+    std::array<Card*, 5> temp = {&copies[0], &copies[1], &copies[2], &copies[3], &copies[4]};
+    const uint32_t win_type = CheckForWin::check_for_win(temp);
+    if (out_win_type) {
+        *out_win_type = win_type;
+    }
+    uint8_t mask = 0;
+    for (uint8_t i = 0; i < 5; i++) {
+        if (temp[i]->is_kept()) {
+            mask |= (1u << i);
+        }
+    }
+    return mask;
+}
+
+bool mask_is_high_pair(const std::array<Card*, 5>& cards, uint8_t mask) {
+    if (held_count(mask) != 2) {
+        return false;
+    }
+    std::vector<uint32_t> ranks = mask_ranks(cards, mask);
+    return ranks[0] == ranks[1] && ranks[0] >= JACK;
+}
+
+const char* explanation_summary_for_label(const std::string& label) {
+    if (label == "Pat royal flush") return "Keep all five cards because you already have the top-paying made hand.";
+    if (label == "Pat straight flush") return "Keep all five cards because the hand is already a straight flush.";
+    if (label == "Pat four of a kind") return "Keep the made four of a kind rather than drawing away from a premium winner.";
+    if (label == "4 to a royal flush") return "Keep the four royal cards because drawing to a royal is the strongest premium draw.";
+    if (label == "Pat full house") return "Keep the full house because it is already a strong made hand.";
+    if (label == "Pat flush") return "Keep the made flush instead of breaking a paying hand.";
+    if (label == "Pat three of a kind") return "Keep the trips and draw two cards to improve to a full house or four of a kind.";
+    if (label == "Pat straight") return "Keep the made straight because it already returns a payout.";
+    if (label == "4 to a straight flush") return "Keep the four-card straight flush draw because it combines straight and flush potential.";
+    if (label == "Pat two pair") return "Keep both pairs and draw one card for a full house.";
+    if (label == "High pair") return "Keep the high pair because it already pays and can improve further.";
+    if (label == "3 to a royal flush") return "Keep the suited royal cards because they retain premium draw value.";
+    if (label == "4 to a flush") return "Keep four suited cards to draw one card toward a flush.";
+    if (label == "Low pair") return "Keep the pair and draw three cards to improve to trips, two pair, full house, or quads.";
+    if (label == "4 to an outside straight") return "Keep the four-card open straight draw because it has multiple improving outs.";
+    if (label == "2 suited high cards") return "Keep the suited high cards because they can make strong paying draws and high pairs.";
+    if (label == "3 to a straight flush") return "Keep the suited connected cards because they retain straight flush potential.";
+    if (label == "2 high cards") return "Keep the high cards because they can form a paying high pair or stronger draw.";
+    if (label == "Suited ten-jack" || label == "Suited queen-jack" || label == "Suited king-queen" ||
+        label == "Suited jack-king" || label == "Suited ace-high draw" || label == "Suited ace-ten" ||
+        label == "Suited king-ten" || label == "Suited queen-ten") {
+        return "Keep the suited high cards because they preserve both high-card value and flush potential.";
+    }
+    if (label == "Unsuited ten-jack" || label == "Unsuited queen-jack" || label == "Unsuited king-queen" ||
+        label == "Unsuited jack-king") {
+        return "Keep the connected high cards because they retain strong high-pair and straight-building value.";
+    }
+    if (label == "Single ace" || label == "Single king" || label == "Single queen" || label == "Single jack" || label == "Single ten") {
+        return "Keep the best single high card when no stronger made hand or draw is available.";
+    }
+    if (label == "Hold nothing") return "Discard all five cards because there is no hold with better draw value.";
+    return "Keep this combination because it best matches the strongest available strategy pattern.";
+}
+
+std::string rule_style_label_for_mask(const std::array<Card*, 5>& cards, uint8_t hold_mask) {
+    if (hold_mask == 0) {
+        return "Hold nothing";
+    }
+
+    uint32_t win_type = NONE;
+    if (kept_mask_from_win_eval(cards, &win_type) == hold_mask) {
+        switch (win_type) {
+            case ROYALFLUSH: return "Pat royal flush";
+            case STRAIGHTFLUSH: return "Pat straight flush";
+            case FOUROFAKIND: return "Pat four of a kind";
+            case FULLHOUSE: return "Pat full house";
+            case FLUSH: return "Pat flush";
+            case THREEOFAKIND: return "Pat three of a kind";
+            case STRAIGHT: return "Pat straight";
+            case TWOPAIR: return "Pat two pair";
+            case HIGHPAIR: return "High pair";
+            default: break;
+        }
+    }
+
+    uint8_t selected_mask = 0;
+    if (select_best_mask(cards, pred_4_to_royal, selected_mask) && selected_mask == hold_mask) return "4 to a royal flush";
+    if (select_best_mask(cards, mask_is_4_to_straight_flush, selected_mask) && selected_mask == hold_mask) return "4 to a straight flush";
+    if (select_best_mask(cards, pred_3_to_royal, selected_mask) && selected_mask == hold_mask) return "3 to a royal flush";
+    if (select_best_mask(cards, pred_4_to_flush, selected_mask) && selected_mask == hold_mask) return "4 to a flush";
+    if (select_best_mask(cards, mask_is_low_pair, selected_mask) && selected_mask == hold_mask) return "Low pair";
+    if (select_best_mask(cards, mask_is_4_to_outside_straight, selected_mask) && selected_mask == hold_mask) return "4 to an outside straight";
+    if (select_best_mask(cards, mask_is_2_suited_high, selected_mask) && selected_mask == hold_mask) return "2 suited high cards";
+    if (select_best_mask(cards, pred_3_to_sf_strong, selected_mask) && selected_mask == hold_mask) return "3 to a straight flush";
+    if (select_best_mask(cards, mask_is_2_unsuited_high, selected_mask) && selected_mask == hold_mask) return "2 high cards";
+    if (select_best_mask(cards, pred_suited_tj, selected_mask) && selected_mask == hold_mask) return "Suited ten-jack";
+    if (select_best_mask(cards, pred_suited_qj, selected_mask) && selected_mask == hold_mask) return "Suited queen-jack";
+    if (select_best_mask(cards, pred_suited_kq, selected_mask) && selected_mask == hold_mask) return "Suited king-queen";
+    if (select_best_mask(cards, pred_suited_jk, selected_mask) && selected_mask == hold_mask) return "Suited jack-king";
+    if (select_best_mask(cards, pred_suited_ak_aq_aj, selected_mask) && selected_mask == hold_mask) return "Suited ace-high draw";
+    if (select_best_mask(cards, pred_unsuited_tj, selected_mask) && selected_mask == hold_mask) return "Unsuited ten-jack";
+    if (select_best_mask(cards, pred_unsuited_qj, selected_mask) && selected_mask == hold_mask) return "Unsuited queen-jack";
+    if (select_best_mask(cards, pred_unsuited_kq, selected_mask) && selected_mask == hold_mask) return "Unsuited king-queen";
+    if (select_best_mask(cards, pred_unsuited_jk, selected_mask) && selected_mask == hold_mask) return "Unsuited jack-king";
+    if (select_best_mask(cards, pred_suited_at, selected_mask) && selected_mask == hold_mask) return "Suited ace-ten";
+    if (select_best_mask(cards, pred_suited_kt, selected_mask) && selected_mask == hold_mask) return "Suited king-ten";
+    if (select_best_mask(cards, pred_suited_qt, selected_mask) && selected_mask == hold_mask) return "Suited queen-ten";
+    if (select_best_mask(cards, pred_3_to_sf_medium, selected_mask) && selected_mask == hold_mask) return "3 to a straight flush";
+    if (select_best_mask(cards, pred_inside_3_high, selected_mask) && selected_mask == hold_mask) return "3 high cards to an inside straight";
+    if (select_best_mask(cards, pred_one_ace, selected_mask) && selected_mask == hold_mask) return "Single ace";
+    if (select_best_mask(cards, pred_one_king, selected_mask) && selected_mask == hold_mask) return "Single king";
+    if (select_best_mask(cards, pred_one_queen, selected_mask) && selected_mask == hold_mask) return "Single queen";
+    if (select_best_mask(cards, pred_one_jack, selected_mask) && selected_mask == hold_mask) return "Single jack";
+    if (select_best_mask(cards, pred_one_ten, selected_mask) && selected_mask == hold_mask) return "Single ten";
+    if (mask_is_high_pair(cards, hold_mask)) return "High pair";
+
+    return "Best expected value hold";
 }
 
 bool mask_same_suit(const std::array<Card*, 5>& cards, uint8_t mask) {
@@ -851,36 +1010,113 @@ uint32_t ml_auto_hold(const std::array<Card*, 5>& cards, uint32_t bet) {
     }
 
     std::vector<float> x(g_ml_input_size, 0.0f);
+    std::array<uint32_t, 13> rank_counts = {0};
+    std::array<uint32_t, 4> suit_counts = {0};
+    std::array<uint32_t, 5> ranks = {0};
     for (uint32_t pos = 0; pos < 5; pos++) {
-        const uint32_t card_id = (cards[pos]->suit() - SPADES) * 13 + (cards[pos]->rank() - TWO);
+        const uint32_t suit_idx = cards[pos]->suit() - SPADES;
+        const uint32_t rank_idx = cards[pos]->rank() - TWO;
+        const uint32_t card_id = suit_idx * 13 + rank_idx;
         const uint32_t feature_idx = pos * 52 + card_id;
         if (feature_idx < x.size()) x[feature_idx] = 1.0f;
+        if (rank_idx < rank_counts.size()) rank_counts[rank_idx]++;
+        if (suit_idx < suit_counts.size()) suit_counts[suit_idx]++;
+        ranks[pos] = cards[pos]->rank();
     }
     if (x.size() > 260) x[260] = static_cast<float>(bet) / 5.0f;
+    if (x.size() > 261) {
+        for (uint32_t i = 0; i < rank_counts.size() && (261 + i) < x.size(); i++) {
+            x[261 + i] = static_cast<float>(rank_counts[i]) / 4.0f;
+        }
+    }
+    if (x.size() > 274) {
+        for (uint32_t i = 0; i < suit_counts.size() && (274 + i) < x.size(); i++) {
+            x[274 + i] = static_cast<float>(suit_counts[i]) / 5.0f;
+        }
+    }
+    if (x.size() > 278) {
+        std::sort(ranks.begin(), ranks.end());
+        for (uint32_t i = 0; i < ranks.size() && (278 + i) < x.size(); i++) {
+            x[278 + i] = static_cast<float>(ranks[i]) / 14.0f;
+        }
+    }
+    if (x.size() > 283) {
+        uint32_t distinct_ranks = 0;
+        for (uint32_t count : rank_counts) {
+            if (count > 0) distinct_ranks++;
+        }
+        x[283] = static_cast<float>(distinct_ranks) / 5.0f;
+    }
+    if (x.size() > 284) {
+        uint32_t max_suit = 0;
+        for (uint32_t count : suit_counts) {
+            if (count > max_suit) max_suit = count;
+        }
+        x[284] = static_cast<float>(max_suit) / 5.0f;
+    }
+    if (x.size() > 285) {
+        uint32_t high_cards = 0;
+        for (uint32_t rank : ranks) {
+            if (rank >= JACK) high_cards++;
+        }
+        x[285] = static_cast<float>(high_cards) / 5.0f;
+    }
 
-    std::vector<float> hidden(g_ml_hidden_size, 0.0f);
-    for (uint32_t j = 0; j < g_ml_hidden_size; j++) {
+    std::vector<float> hidden1(g_ml_hidden1_size, 0.0f);
+    for (uint32_t j = 0; j < g_ml_hidden1_size; j++) {
         float v = g_ml_b1[j];
         const size_t row_offset = static_cast<size_t>(j) * g_ml_input_size;
         for (uint32_t i = 0; i < g_ml_input_size; i++) v += x[i] * g_ml_w1[row_offset + i];
-        hidden[j] = (v > 0.0f) ? v : 0.0f;
+        hidden1[j] = (v > 0.0f) ? v : 0.0f;
     }
 
-    uint32_t best_mask = 0;
-    float best_logit = 0.0f;
-    bool have_best = false;
-    for (uint32_t k = 0; k < g_ml_output_size; k++) {
-        float v = g_ml_b2[k];
-        const size_t row_offset = static_cast<size_t>(k) * g_ml_hidden_size;
-        for (uint32_t j = 0; j < g_ml_hidden_size; j++) v += hidden[j] * g_ml_w2[row_offset + j];
-        if (!have_best || v > best_logit) {
-            best_logit = v;
-            best_mask = k;
-            have_best = true;
+    std::vector<float> hidden2;
+    const bool has_second_hidden = g_ml_hidden2_size > 0 && !g_ml_w3.empty() && !g_ml_b3.empty();
+    if (has_second_hidden) {
+        hidden2.assign(g_ml_hidden2_size, 0.0f);
+        for (uint32_t j = 0; j < g_ml_hidden2_size; j++) {
+            float v = g_ml_b2[j];
+            const size_t row_offset = static_cast<size_t>(j) * g_ml_hidden1_size;
+            for (uint32_t i = 0; i < g_ml_hidden1_size; i++) v += hidden1[i] * g_ml_w2[row_offset + i];
+            hidden2[j] = (v > 0.0f) ? v : 0.0f;
         }
     }
 
-    if (best_mask > 31) best_mask = 31;
+    uint32_t best_mask = 0;
+    if (g_ml_output_size == 5) {
+        for (uint32_t k = 0; k < 5; k++) {
+            float v = has_second_hidden ? g_ml_b3[k] : g_ml_b2[k];
+            if (has_second_hidden) {
+                const size_t row_offset = static_cast<size_t>(k) * g_ml_hidden2_size;
+                for (uint32_t j = 0; j < g_ml_hidden2_size; j++) v += hidden2[j] * g_ml_w3[row_offset + j];
+            } else {
+                const size_t row_offset = static_cast<size_t>(k) * g_ml_hidden1_size;
+                for (uint32_t j = 0; j < g_ml_hidden1_size; j++) v += hidden1[j] * g_ml_w2[row_offset + j];
+            }
+            if (v > 0.0f) {
+                best_mask |= (1u << k);
+            }
+        }
+    } else {
+        float best_logit = 0.0f;
+        bool have_best = false;
+        for (uint32_t k = 0; k < g_ml_output_size; k++) {
+            float v = has_second_hidden ? g_ml_b3[k] : g_ml_b2[k];
+            if (has_second_hidden) {
+                const size_t row_offset = static_cast<size_t>(k) * g_ml_hidden2_size;
+                for (uint32_t j = 0; j < g_ml_hidden2_size; j++) v += hidden2[j] * g_ml_w3[row_offset + j];
+            } else {
+                const size_t row_offset = static_cast<size_t>(k) * g_ml_hidden1_size;
+                for (uint32_t j = 0; j < g_ml_hidden1_size; j++) v += hidden1[j] * g_ml_w2[row_offset + j];
+            }
+            if (!have_best || v > best_logit) {
+                best_logit = v;
+                best_mask = k;
+                have_best = true;
+            }
+        }
+        if (best_mask > 31) best_mask = 31;
+    }
     apply_mask(cards, static_cast<uint8_t>(best_mask));
 
     if (g_autohold_verbose) std::cout << "Hold ml-model" << std::endl;
@@ -908,11 +1144,13 @@ bool AutoHold::set_ml_model(const char* model_path) {
     buffer << in.rdbuf();
     const std::string text = buffer.str();
 
-    uint32_t input_size = 0, hidden_size = 0, output_size = 0;
-    std::vector<float> w1, b1, w2, b2;
+    uint32_t input_size = 0;
+    uint32_t hidden1_size = 0;
+    uint32_t hidden2_size = 0;
+    uint32_t output_size = 0;
+    std::vector<float> w1, b1, w2, b2, w3, b3;
 
     if (!parse_json_uint_field(text, "input_size", input_size) ||
-        !parse_json_uint_field(text, "hidden_size", hidden_size) ||
         !parse_json_uint_field(text, "output_size", output_size) ||
         !parse_json_float_array_field(text, "W1", w1) ||
         !parse_json_float_array_field(text, "b1", b1) ||
@@ -921,20 +1159,55 @@ bool AutoHold::set_ml_model(const char* model_path) {
         return false;
     }
 
-    if (w1.size() != static_cast<size_t>(hidden_size) * input_size ||
-        b1.size() != hidden_size ||
-        w2.size() != static_cast<size_t>(output_size) * hidden_size ||
-        b2.size() != output_size) {
+    const bool has_hidden2 =
+        parse_json_uint_field(text, "hidden1_size", hidden1_size) &&
+        parse_json_uint_field(text, "hidden2_size", hidden2_size) &&
+        parse_json_float_array_field(text, "W3", w3) &&
+        parse_json_float_array_field(text, "b3", b3);
+
+    if (!has_hidden2) {
+        if (!parse_json_uint_field(text, "hidden_size", hidden1_size)) {
+            return false;
+        }
+        hidden2_size = 0;
+    }
+
+    if (w1.size() != static_cast<size_t>(hidden1_size) * input_size ||
+        b1.size() != hidden1_size) {
         return false;
     }
 
+    if (has_hidden2) {
+        if (w2.size() != static_cast<size_t>(hidden2_size) * hidden1_size ||
+            b2.size() != hidden2_size ||
+            w3.size() != static_cast<size_t>(output_size) * hidden2_size ||
+            b3.size() != output_size) {
+            return false;
+        }
+    } else {
+        if (w2.size() != static_cast<size_t>(output_size) * hidden1_size ||
+            b2.size() != output_size) {
+            return false;
+        }
+    }
+
+    for (float v : w1) if (!std::isfinite(v)) return false;
+    for (float v : b1) if (!std::isfinite(v)) return false;
+    for (float v : w2) if (!std::isfinite(v)) return false;
+    for (float v : b2) if (!std::isfinite(v)) return false;
+    for (float v : w3) if (!std::isfinite(v)) return false;
+    for (float v : b3) if (!std::isfinite(v)) return false;
+
     g_ml_input_size = input_size;
-    g_ml_hidden_size = hidden_size;
+    g_ml_hidden1_size = hidden1_size;
+    g_ml_hidden2_size = hidden2_size;
     g_ml_output_size = output_size;
     g_ml_w1 = std::move(w1);
     g_ml_b1 = std::move(b1);
     g_ml_w2 = std::move(w2);
     g_ml_b2 = std::move(b2);
+    g_ml_w3 = std::move(w3);
+    g_ml_b3 = std::move(b3);
     g_ml_model_loaded = true;
     return true;
 }
@@ -957,4 +1230,95 @@ uint32_t AutoHold::auto_hold(const std::array<Card*, 5>& cards, uint32_t bet, do
         return ml_auto_hold(cards, bet);
     }
     return solver_auto_hold(cards, bet, out_ev);
+}
+
+std::string AutoHold::explain_hold_label(const std::array<Card*, 5>& cards, uint32_t hold_mask) {
+    return rule_style_label_for_mask(cards, static_cast<uint8_t>(hold_mask & 31u));
+}
+
+std::string AutoHold::explain_hold_summary(const std::array<Card*, 5>& cards, uint32_t hold_mask) {
+    const std::string label = explain_hold_label(cards, hold_mask);
+    return explanation_summary_for_label(label);
+}
+
+bool AutoHold::solver_top_two(const std::array<Card*, 5>& cards, uint32_t bet, uint32_t& best_mask, double& best_ev, uint32_t& second_mask, double& second_ev) {
+    bool in_hand_flags[52] = {false};
+    for (uint32_t i = 0; i < 5; i++) {
+        const uint32_t deck_idx = (cards[i]->suit() - SPADES) * 13 + (cards[i]->rank() - TWO);
+        in_hand_flags[deck_idx] = true;
+    }
+
+    std::vector<LiteCard> remaining;
+    remaining.reserve(47);
+    for (uint32_t idx = 0; idx < 52; idx++) {
+        if (!in_hand_flags[idx]) {
+            remaining.push_back(kFullDeck[idx]);
+        }
+    }
+
+    bool have_best = false;
+    bool have_second = false;
+    uint64_t best_total_payout = 0;
+    uint32_t best_ways = 1;
+    uint64_t second_total_payout = 0;
+    uint32_t second_ways = 1;
+    best_mask = 0;
+    second_mask = 0;
+
+    for (uint32_t mask = 0; mask < 32; mask++) {
+        std::array<LiteCard, 5> base_cards;
+        std::array<uint8_t, 5> discard_slots = {0, 0, 0, 0, 0};
+        uint8_t discard_count = 0;
+
+        for (uint8_t i = 0; i < 5; i++) {
+            base_cards[i] = {static_cast<uint8_t>(cards[i]->suit()), static_cast<uint8_t>(cards[i]->rank())};
+            if ((mask & (1u << i)) == 0) discard_slots[discard_count++] = i;
+        }
+
+        uint64_t total_payout = 0;
+        uint32_t ways = 0;
+        evaluate_mask_ev(remaining, discard_slots, discard_count, base_cards, bet, total_payout, ways);
+
+        if (!have_best) {
+            best_mask = mask;
+            best_total_payout = total_payout;
+            best_ways = ways;
+            have_best = true;
+            continue;
+        }
+
+        __uint128_t lhs = static_cast<__uint128_t>(total_payout) * best_ways;
+        __uint128_t rhs = static_cast<__uint128_t>(best_total_payout) * ways;
+        if (lhs > rhs) {
+            second_mask = best_mask;
+            second_total_payout = best_total_payout;
+            second_ways = best_ways;
+            have_second = true;
+
+            best_mask = mask;
+            best_total_payout = total_payout;
+            best_ways = ways;
+            continue;
+        }
+
+        if (!have_second) {
+            second_mask = mask;
+            second_total_payout = total_payout;
+            second_ways = ways;
+            have_second = true;
+            continue;
+        }
+
+        lhs = static_cast<__uint128_t>(total_payout) * second_ways;
+        rhs = static_cast<__uint128_t>(second_total_payout) * ways;
+        if (lhs > rhs) {
+            second_mask = mask;
+            second_total_payout = total_payout;
+            second_ways = ways;
+        }
+    }
+
+    best_ev = static_cast<double>(best_total_payout) / static_cast<double>(best_ways);
+    second_ev = have_second ? (static_cast<double>(second_total_payout) / static_cast<double>(second_ways)) : best_ev;
+    return have_best;
 }
