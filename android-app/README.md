@@ -30,8 +30,8 @@ Native layer calls `poker-core/c++/trainer_api.cpp` and exposes:
 - Bet controls (`1...5`)
 - Autohold toggle
 - ML model path input for `ml`
-- `Deal Hand`: deals a hand (optionally with automatic holds)
+- `Deal`: deals a hand (optionally with automatic holds)
 - Tap initial cards to manually toggle holds
-- `Draw Selected`: draws using user hold selection
+- `Draw`: draws using user hold selection
 - Final hand display with winning cards highlighted
 - Payout display

@@ -1,6 +1,7 @@
 package com.example.videopoker
 
 import android.os.Bundle
+import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
@@ -20,11 +21,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -53,17 +55,24 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AppScreen() {
+    val context = LocalContext.current
     var engine by remember { mutableStateOf("solver") }
     var bet by remember { mutableIntStateOf(5) }
-    var modelPath by remember { mutableStateOf("") }
     var payout by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf("") }
     var suggestedMask by remember { mutableIntStateOf(0) }
+    var explanationLabel by remember { mutableStateOf("") }
+    var explanationSummary by remember { mutableStateOf("") }
+    var showExplanationDetails by remember { mutableStateOf(false) }
+    var solverNextBest by remember { mutableStateOf("") }
+    var solverBestEv by remember { mutableStateOf<Double?>(null) }
+    var solverNextEv by remember { mutableStateOf<Double?>(null) }
     var canDraw by remember { mutableStateOf(false) }
     var autoHoldEnabled by remember { mutableStateOf(true) }
 
     val initialCards = remember { mutableStateListOf<UiCard>() }
     val finalCards = remember { mutableStateListOf<UiCard>() }
+    val bundledModelPath = remember { ensureBundledModelPath(context) }
 
     var handle by remember { mutableLongStateOf(0L) }
     DisposableEffect(Unit) {
@@ -75,18 +84,99 @@ private fun AppScreen() {
         }
     }
 
+    LaunchedEffect(engine, autoHoldEnabled, canDraw, bet) {
+        if (!canDraw || initialCards.size != 5 || handle == 0L) {
+            return@LaunchedEffect
+        }
+        error = ""
+        if (!prepareEngine(handle, engine, bundledModelPath)) {
+            error = if (engine == "ml") "Failed to set engine/model" else "Failed to set engine"
+            return@LaunchedEffect
+        }
+        val updatedMask = recalculateSuggestedMask(handle, bet, initialCards)
+        if (updatedMask < 0) {
+            error = "Failed to update suggested holds"
+            return@LaunchedEffect
+        }
+        suggestedMask = updatedMask
+        val explanation = explainHold(initialCards, updatedMask)
+        explanationLabel = explanation.first
+        explanationSummary = explanation.second
+        val solverAnalysis = if (engine == "solver") analyzeSolver(initialCards, bet) else null
+        solverBestEv = solverAnalysis?.bestEv
+        solverNextEv = solverAnalysis?.secondEv
+        solverNextBest = solverAnalysis?.let { formatHeldCards(initialCards, it.secondMask) }.orEmpty()
+        if (autoHoldEnabled) {
+            applyHoldMask(initialCards, updatedMask)
+        }
+    }
+
     MaterialTheme {
         Column(
             modifier = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.Center,
+            verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            /*
             Text(
                 "Video Poker Trainer",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
+            */
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "Jacks or Better 9/6",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    "Expected RTP (optimal play): 99.54%",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.DarkGray,
+                    textAlign = TextAlign.Center
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .background(Color(0xFFF3F3F3), RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        "Paytable ($bet coin${if (bet == 1) "" else "s"})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center
+                    )
+                    paytableEntries(bet).forEach { entry ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                entry.name,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.DarkGray
+                            )
+                            Text(
+                                entry.payout.toString(),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -125,22 +215,12 @@ private fun AppScreen() {
                 Switch(checked = autoHoldEnabled, onCheckedChange = { autoHoldEnabled = it })
             }
 
-            if (engine == "ml") {
-                Spacer(modifier = Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = modelPath,
-                    onValueChange = { modelPath = it },
-                    label = { Text("ML model path (model.json)") },
-                    modifier = Modifier.fillMaxWidth(0.8f)
-                )
-            }
-
             Spacer(modifier = Modifier.height(16.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = {
                     error = ""
-                    if (!prepareEngine(handle, engine, modelPath)) {
+                    if (!prepareEngine(handle, engine, bundledModelPath)) {
                         error = if (engine == "ml") "Failed to set engine/model" else "Failed to set engine"
                         return@Button
                     }
@@ -149,11 +229,25 @@ private fun AppScreen() {
                         error = "Failed to deal"
                         return@Button
                     }
-                    populateFromData(data, initialCards, finalCards, autoHoldEnabled)
+                    populateFromData(
+                        data = data,
+                        initialCards = initialCards,
+                        finalCards = finalCards,
+                        useHeld = autoHoldEnabled,
+                        includeFinalCards = false
+                    )
                     payout = 0
                     suggestedMask = data[20]
+                    val explanation = explainHold(initialCards, suggestedMask)
+                    explanationLabel = explanation.first
+                    explanationSummary = explanation.second
+                    val solverAnalysis = if (engine == "solver") analyzeSolver(initialCards, bet) else null
+                    solverBestEv = solverAnalysis?.bestEv
+                    solverNextEv = solverAnalysis?.secondEv
+                    solverNextBest = solverAnalysis?.let { formatHeldCards(initialCards, it.secondMask) }.orEmpty()
+                    showExplanationDetails = false
                     canDraw = true
-                }) { Text("Deal Hand") }
+                }) { Text("Deal") }
 
                 Button(onClick = {
                     error = ""
@@ -165,10 +259,22 @@ private fun AppScreen() {
                         error = "Failed to draw. Deal first."
                         return@Button
                     }
-                    populateFromData(data, initialCards, finalCards, true)
+                    populateFromData(
+                        data = data,
+                        initialCards = initialCards,
+                        finalCards = finalCards,
+                        useHeld = true,
+                        includeFinalCards = true
+                    )
                     payout = data[21]
+                    explanationLabel = ""
+                    explanationSummary = ""
+                    solverBestEv = null
+                    solverNextEv = null
+                    solverNextBest = ""
+                    showExplanationDetails = false
                     canDraw = false
-                }, enabled = canDraw) { Text("Draw Selected") }
+                }, enabled = canDraw) { Text("Draw") }
             }
 
             if (error.isNotEmpty()) {
@@ -192,6 +298,48 @@ private fun AppScreen() {
                 }
             }
 
+            if (explanationLabel.isNotEmpty() && initialCards.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Why: $explanationLabel",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center
+                )
+                TextButton(onClick = { showExplanationDetails = !showExplanationDetails }) {
+                    Text(if (showExplanationDetails) "Hide details" else "Details")
+                }
+                if (showExplanationDetails) {
+                    Text(
+                        explanationSummary,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        color = Color.DarkGray
+                    )
+                    if (engine == "solver" && solverBestEv != null && solverNextEv != null && solverNextBest.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Best EV: ${"%.2f".format(solverBestEv)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center,
+                            color = Color.DarkGray
+                        )
+                        Text(
+                            "Next best: Hold $solverNextBest - EV ${"%.2f".format(solverNextEv)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center,
+                            color = Color.DarkGray
+                        )
+                        Text(
+                            "EV edge: +${"%.2f".format((solverBestEv ?: 0.0) - (solverNextEv ?: 0.0))}",
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center,
+                            color = Color.DarkGray
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
 
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -202,7 +350,7 @@ private fun AppScreen() {
             Spacer(modifier = Modifier.height(16.dp))
             Text(
                 "Payout: $payout",
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Bold,
                 color = if (payout > 0) Color(0xFF2E7D32) else Color.Gray
             )
@@ -210,18 +358,109 @@ private fun AppScreen() {
     }
 }
 
-private fun prepareEngine(handle: Long, engine: String, modelPath: String): Boolean {
+private fun prepareEngine(handle: Long, engine: String, bundledModelPath: String): Boolean {
     if (!NativeBridge.nativeSetEngine(handle, engine)) {
         return false
     }
     if (engine == "ml") {
-        if (modelPath.isBlank()) return false
-        if (!NativeBridge.nativeSetMlModel(handle, modelPath)) return false
+        if (bundledModelPath.isBlank()) return false
+        if (!NativeBridge.nativeSetMlModel(handle, bundledModelPath)) return false
     }
     return true
 }
 
-private fun populateFromData(data: IntArray, initialCards: MutableList<UiCard>, finalCards: MutableList<UiCard>, useHeld: Boolean) {
+private fun ensureBundledModelPath(context: android.content.Context): String {
+    val targetFile = File(context.filesDir, "model.json")
+    if (!targetFile.exists()) {
+        context.assets.open("model.json").use { input ->
+            targetFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+    }
+    return targetFile.absolutePath
+}
+
+private fun recalculateSuggestedMask(handle: Long, bet: Int, cards: List<UiCard>): Int {
+    val suits = IntArray(5) { index -> cards[index].suit }
+    val ranks = IntArray(5) { index -> cards[index].rank }
+    return NativeBridge.nativeCalculateHoldMask(handle, bet, suits, ranks)
+}
+
+private fun applyHoldMask(cards: MutableList<UiCard>, holdMask: Int) {
+    for (i in cards.indices) {
+        val card = cards[i]
+        cards[i] = card.copy(held = (holdMask and (1 shl i)) != 0)
+    }
+}
+
+private fun explainHold(cards: List<UiCard>, holdMask: Int): Pair<String, String> {
+    val suits = IntArray(5) { index -> cards[index].suit }
+    val ranks = IntArray(5) { index -> cards[index].rank }
+    val explanation = NativeBridge.nativeExplainHold(suits, ranks, holdMask) ?: return "" to ""
+    return explanation.getOrNull(0).orEmpty() to explanation.getOrNull(1).orEmpty()
+}
+
+private data class PaytableEntry(val name: String, val payout: Int)
+
+private fun paytableEntries(bet: Int): List<PaytableEntry> = listOf(
+    PaytableEntry("Royal Flush", if (bet == 5) 4000 else bet * 250),
+    PaytableEntry("Straight Flush", bet * 50),
+    PaytableEntry("Four of a Kind", bet * 25),
+    PaytableEntry("Full House", bet * 9),
+    PaytableEntry("Flush", bet * 6),
+    PaytableEntry("Straight", bet * 4),
+    PaytableEntry("Three of a Kind", bet * 3),
+    PaytableEntry("Two Pair", bet * 2),
+    PaytableEntry("Jacks or Better", bet)
+)
+
+private data class SolverAnalysis(val bestMask: Int, val secondMask: Int, val bestEv: Double, val secondEv: Double)
+
+private fun analyzeSolver(cards: List<UiCard>, bet: Int): SolverAnalysis? {
+    val suits = IntArray(5) { index -> cards[index].suit }
+    val ranks = IntArray(5) { index -> cards[index].rank }
+    val result = NativeBridge.nativeAnalyzeSolver(suits, ranks, bet) ?: return null
+    if (result.size < 4) return null
+    return SolverAnalysis(
+        bestMask = result[0].toInt(),
+        secondMask = result[1].toInt(),
+        bestEv = result[2],
+        secondEv = result[3]
+    )
+}
+
+private fun formatHeldCards(cards: List<UiCard>, holdMask: Int): String {
+    val held = cards.mapIndexedNotNull { index, card ->
+        if ((holdMask and (1 shl index)) == 0) null else "${rankText(card.rank)}${suitText(card.suit)}"
+    }
+    return if (held.isEmpty()) "nothing" else held.joinToString(" ")
+}
+
+private fun rankText(rank: Int): String = when (rank) {
+    14 -> "A"
+    13 -> "K"
+    12 -> "Q"
+    11 -> "J"
+    10 -> "10"
+    else -> rank.toString()
+}
+
+private fun suitText(suit: Int): String = when (suit) {
+    1 -> "s"
+    2 -> "c"
+    3 -> "h"
+    4 -> "d"
+    else -> "?"
+}
+
+private fun populateFromData(
+    data: IntArray,
+    initialCards: MutableList<UiCard>,
+    finalCards: MutableList<UiCard>,
+    useHeld: Boolean,
+    includeFinalCards: Boolean
+) {
     initialCards.clear()
     finalCards.clear()
 
@@ -232,10 +471,12 @@ private fun populateFromData(data: IntArray, initialCards: MutableList<UiCard>, 
         initialCards += UiCard(data[base], data[base + 1], isHeld, data[base + 3] == 1)
     }
 
-    // starts after initial (20 ints) + hold_mask (1) + payout (1) = 22
-    for (i in 0 until 5) {
-        val base = 22 + i * 4
-        finalCards += UiCard(data[base], data[base + 1], data[base + 2] == 1, data[base + 3] == 1)
+    if (includeFinalCards) {
+        // starts after initial (20 ints) + hold_mask (1) + payout (1) = 22
+        for (i in 0 until 5) {
+            val base = 22 + i * 4
+            finalCards += UiCard(data[base], data[base + 1], data[base + 2] == 1, data[base + 3] == 1)
+        }
     }
 }
 
