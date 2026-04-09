@@ -12,23 +12,62 @@ struct UiCard: Identifiable {
 struct ContentView: View {
     @State private var engine: String = "solver"
     @State private var bet: Int = 5
-    @State private var mlModelPath: String = ""
     @State private var initialCards: [UiCard] = []
     @State private var finalCards: [UiCard] = []
     @State private var payout: Int = 0
     @State private var errorText: String = ""
     @State private var suggestedMask: Int = 0
+    @State private var explanationLabel: String = ""
+    @State private var explanationSummary: String = ""
+    @State private var showExplanationDetails: Bool = false
+    @State private var solverNextBest: String = ""
+    @State private var solverBestEV: Double? = nil
+    @State private var solverNextEV: Double? = nil
     @State private var canDraw: Bool = false
     @State private var autoHoldEnabled: Bool = true
 
     private let bridge = PokerEngineBridge(seed: UInt64(Date().timeIntervalSince1970 * 1000))
+    private var bundledMlModelPath: String {
+        return Bundle.main.path(forResource: "model", ofType: "json") ?? ""
+    }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
-                Text("Video Poker Trainer")
-                    .font(.largeTitle.weight(.bold))
-                    .multilineTextAlignment(.center)
+                //Text("Video Poker Trainer")
+                //    .font(.largeTitle.weight(.bold))
+                //    .multilineTextAlignment(.center)
+
+                VStack(spacing: 8) {
+                    Text("Jacks or Better 9/6")
+                        .font(.title3.weight(.semibold))
+                        .multilineTextAlignment(.center)
+
+                    Text("Expected RTP (optimal play): 99.54%")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+
+                    VStack(spacing: 6) {
+                        Text("Paytable (\(bet) coin\(bet == 1 ? "" : "s"))")
+                            .font(.subheadline.weight(.semibold))
+
+                        ForEach(paytableEntries(for: bet), id: \.name) { entry in
+                            HStack {
+                                Text(entry.name)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text("\(entry.payout)")
+                                    .fontWeight(.semibold)
+                            }
+                            .font(.caption)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: 320)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(12)
+                }
 
                 Picker("Engine", selection: $engine) {
                     Text("solver").tag("solver")
@@ -56,19 +95,13 @@ struct ContentView: View {
                     }
                 }
 
-                if engine == "ml" {
-                    TextField("ML model path (model.json)", text: $mlModelPath)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 300)
-                }
-
                 HStack(spacing: 16) {
-                    Button("Deal Hand") {
+                    Button("Deal") {
                         dealSuggested()
                     }
                     .buttonStyle(.borderedProminent)
 
-                    Button("Draw Selected") {
+                    Button("Draw") {
                         drawSelected()
                     }
                     .buttonStyle(.bordered)
@@ -95,6 +128,50 @@ struct ContentView: View {
                             }
                         }
                     }
+
+                    if !explanationLabel.isEmpty && !initialCards.isEmpty {
+                        VStack(spacing: 4) {
+                            Text("Why: \(explanationLabel)")
+                                .font(.subheadline.weight(.medium))
+                                .multilineTextAlignment(.center)
+
+                            Button(showExplanationDetails ? "Hide Details" : "Details") {
+                                showExplanationDetails.toggle()
+                            }
+                            .font(.caption)
+
+                            if showExplanationDetails {
+                                VStack(spacing: 8) {
+                                    Text(explanationSummary)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .multilineTextAlignment(.center)
+                                    
+                                    if engine == "solver",
+                                       let bestEV = solverBestEV,
+                                       let nextEV = solverNextEV,
+                                       !solverNextBest.isEmpty {
+                                        VStack(spacing: 0) {
+                                            Text("Best EV: \(String(format: "%.2f", bestEV))")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                                .multilineTextAlignment(.center)
+                                            
+                                            Text("Next best: Hold \(solverNextBest) - EV \(String(format: "%.2f", nextEV))")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                                .multilineTextAlignment(.center)
+                                            
+                                            Text("EV edge: +\(String(format: "%.2f", bestEV - nextEV))")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                                .multilineTextAlignment(.center)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     
                     VStack(spacing: 8) {
                         Text("Final")
@@ -104,7 +181,7 @@ struct ContentView: View {
                 }
 
                 Text("Payout: \(payout)")
-                    .font(.title.weight(.bold))
+                    .font(.title3.weight(.bold))
                     .foregroundColor(payout > 0 ? .green : .secondary)
 
                 Spacer()
@@ -112,16 +189,30 @@ struct ContentView: View {
             .padding()
             .frame(maxWidth: .infinity)
         }
+        .onChange(of: engine) { _ in
+            refreshSuggestedHolds()
+        }
+        .onChange(of: autoHoldEnabled) { _ in
+            refreshSuggestedHolds()
+        }
+        .onChange(of: canDraw) { newValue in
+            if newValue {
+                refreshSuggestedHolds()
+            }
+        }
+        .onChange(of: bet) { _ in
+            refreshSuggestedHolds()
+        }
     }
 
     private func prepareEngine() -> NSError? {
         do {
             try bridge.setEngine(engine)
             if engine == "ml" {
-                if mlModelPath.isEmpty {
-                    return NSError(domain: "PokerEngine", code: 3, userInfo: [NSLocalizedDescriptionKey: "Please provide ML model path"])
+                if bundledMlModelPath.isEmpty {
+                    return NSError(domain: "PokerEngine", code: 3, userInfo: [NSLocalizedDescriptionKey: "Bundled ML model was not found"])
                 }
-                try bridge.loadMlModel(mlModelPath)
+                try bridge.loadMlModel(bundledMlModelPath)
             }
             return nil
         } catch {
@@ -157,6 +248,11 @@ struct ContentView: View {
                 winning: ($0["winning"] as? Int ?? 0) == 1
             )
         }
+        let explanation = explainHold(cards: initialCards, holdMask: suggestedMask)
+        explanationLabel = explanation.label
+        explanationSummary = explanation.summary
+        updateSolverAnalysis(cards: initialCards)
+        showExplanationDetails = false
         finalCards = []
     }
 
@@ -177,6 +273,12 @@ struct ContentView: View {
 
         canDraw = false
         payout = handData["payout"] as? Int ?? 0
+        explanationLabel = ""
+        explanationSummary = ""
+        solverNextBest = ""
+        solverBestEV = nil
+        solverNextEV = nil
+        showExplanationDetails = false
 
         let initial = handData["initial"] as? [[String: Any]] ?? []
         initialCards = initial.map {
@@ -198,6 +300,145 @@ struct ContentView: View {
             )
         }
     }
+
+    private func refreshSuggestedHolds() {
+        guard canDraw, initialCards.count == 5 else {
+            return
+        }
+
+        errorText = ""
+        if let err = prepareEngine() {
+            errorText = err.localizedDescription
+            return
+        }
+
+        let suits = initialCards.map { NSNumber(value: $0.suit) }
+        let ranks = initialCards.map { NSNumber(value: $0.rank) }
+        var updatedMask: UInt = 0
+
+        do {
+            try bridge.calculateHoldMask(withBet: bet, suits: suits, ranks: ranks, holdMask: &updatedMask)
+            suggestedMask = Int(updatedMask)
+            let explanation = explainHold(cards: initialCards, holdMask: suggestedMask)
+            explanationLabel = explanation.label
+            explanationSummary = explanation.summary
+            updateSolverAnalysis(cards: initialCards)
+            if autoHoldEnabled {
+                applyHoldMask(Int(updatedMask))
+            }
+        } catch {
+            errorText = (error as NSError).localizedDescription
+        }
+    }
+
+    private func updateSolverAnalysis(cards: [UiCard]) {
+        guard engine == "solver" else {
+            solverNextBest = ""
+            solverBestEV = nil
+            solverNextEV = nil
+            return
+        }
+
+        guard let analysis = analyzeSolver(cards: cards) else {
+            solverNextBest = ""
+            solverBestEV = nil
+            solverNextEV = nil
+            return
+        }
+
+        solverBestEV = analysis.bestEV
+        solverNextEV = analysis.secondEV
+        solverNextBest = formatHeldCards(cards: cards, holdMask: analysis.secondMask)
+    }
+
+    private func applyHoldMask(_ holdMask: Int) {
+        initialCards = initialCards.enumerated().map { idx, card in
+            var updatedCard = card
+            updatedCard.held = (holdMask & (1 << idx)) != 0
+            return updatedCard
+        }
+    }
+
+    private func explainHold(cards: [UiCard], holdMask: Int) -> (label: String, summary: String) {
+        let suits = cards.map { NSNumber(value: $0.suit) }
+        let ranks = cards.map { NSNumber(value: $0.rank) }
+        do {
+            let explanation = try bridge.explainHold(withSuits: suits, ranks: ranks, holdMask: UInt(holdMask))
+            let label = explanation["label"] as? String ?? ""
+            let summary = explanation["summary"] as? String ?? ""
+            return (label, summary)
+        } catch {
+            return ("", "")
+        }
+    }
+
+    private func analyzeSolver(cards: [UiCard]) -> (bestMask: Int, secondMask: Int, bestEV: Double, secondEV: Double)? {
+        let suits = cards.map { NSNumber(value: $0.suit) }
+        let ranks = cards.map { NSNumber(value: $0.rank) }
+        do {
+            let analysis = try bridge.analyzeSolver(withBet: bet, suits: suits, ranks: ranks)
+            return (
+                bestMask: analysis["bestMask"] as? Int ?? 0,
+                secondMask: analysis["secondMask"] as? Int ?? 0,
+                bestEV: analysis["bestEV"] as? Double ?? 0,
+                secondEV: analysis["secondEV"] as? Double ?? 0
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    private func formatHeldCards(cards: [UiCard], holdMask: Int) -> String {
+        let held = cards.enumerated().compactMap { index, card -> String? in
+            guard (holdMask & (1 << index)) != 0 else {
+                return nil
+            }
+            return "\(rankText(card.rank))\(suitText(card.suit))"
+        }
+        return held.isEmpty ? "nothing" : held.joined(separator: " ")
+    }
+
+    private func rankText(_ rank: Int) -> String {
+        switch rank {
+        case 14: return "A"
+        case 13: return "K"
+        case 12: return "Q"
+        case 11: return "J"
+        case 10: return "10"
+        default: return String(rank)
+        }
+    }
+
+    private func suitText(_ suit: Int) -> String {
+        switch suit {
+        case 1: return "s"
+        case 2: return "c"
+        case 3: return "h"
+        case 4: return "d"
+        default: return "?"
+        }
+    }
+}
+
+private struct PaytableEntry: Identifiable {
+    let name: String
+    let payout: Int
+
+    var id: String { name }
+}
+
+private func paytableEntries(for bet: Int) -> [PaytableEntry] {
+    [
+        PaytableEntry(name: "Royal Flush", payout: bet == 5 ? 4000 : bet * 250),
+        PaytableEntry(name: "Straight Flush", payout: bet * 50),
+        PaytableEntry(name: "Four of a Kind", payout: bet * 25),
+        PaytableEntry(name: "Full House", payout: bet * 9),
+        PaytableEntry(name: "Flush", payout: bet * 6),
+        PaytableEntry(name: "Straight", payout: bet * 4),
+        PaytableEntry(name: "Three of a Kind", payout: bet * 3),
+        PaytableEntry(name: "Two Pair", payout: bet * 2),
+        PaytableEntry(name: "Jacks or Better", payout: bet)
+    ]
 }
 
 struct CardRow: View {

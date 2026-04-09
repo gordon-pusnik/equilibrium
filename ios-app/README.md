@@ -26,8 +26,8 @@ This folder contains a starter iOS app scaffold that uses the C++ poker engine t
 - Engine selector: `solver`, `rule`, `ml`
 - Bet selector (`1...5`)
 - ML model path field (shown when `ml` selected)
-- `Deal Hand`: deals a hand and allows manual selection (unless Autohold is ON)
+- `Deal`: deals a hand and allows manual selection (unless Autohold is ON)
 - Tap initial cards to manually toggle held state
-- `Draw Selected`: draws using user-selected hold mask
+- `Draw`: draws using user-selected hold mask
 - Graphical card row for final hand with winning cards highlighted
 - Payout display

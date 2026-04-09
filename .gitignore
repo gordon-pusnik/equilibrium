@@ -13,6 +13,7 @@ DerivedData/
 Debug/
 .idea
 .DS_Store
+machine-learning/
 
 # Visual Studio / C# artifacts
 .vs/
