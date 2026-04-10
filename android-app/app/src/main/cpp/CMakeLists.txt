@@ -11,6 +11,7 @@ add_library(videopoker_native SHARED
     ${ENGINE_DIR}/hand.cpp
     ${ENGINE_DIR}/checkforwin.cpp
     ${ENGINE_DIR}/autohold.cpp
+    ${ENGINE_DIR}/game_variant.cpp
     ${ENGINE_DIR}/trainer_api.cpp
     ${ENGINE_DIR}/evaluator.cpp
 )

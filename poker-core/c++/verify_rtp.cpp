@@ -11,6 +11,8 @@
 
 #include "autohold.h"
 #include "card.h"
+#include "game_variant.h"
+#include "hand.h"
 
 namespace {
 struct SimCard {
@@ -18,7 +20,7 @@ struct SimCard {
     uint8_t rank;
 };
 
-uint32_t payout_for_cards(const std::array<SimCard, 5>& cards, uint32_t bet) {
+uint32_t payout_for_cards(const std::array<SimCard, 5>& cards, uint32_t bet, GameVariant variant) {
     uint32_t rank_mask = 0;
     uint64_t rank_counts = 0;
     uint32_t suit_mask = 0;
@@ -43,9 +45,9 @@ uint32_t payout_for_cards(const std::array<SimCard, 5>& cards, uint32_t bet) {
 
     if (flush && straight) {
         if (rank_mask == 0x7C00) { // 10, J, Q, K, A
-            return (bet == 5) ? (bet * 800) : (bet * 250);
+            return payout_for_result(ROYALFLUSH, bet, variant);
         }
-        return bet * 50;
+        return payout_for_result(STRAIGHTFLUSH, bet, variant);
     }
 
     uint32_t quads = 0;
@@ -63,13 +65,13 @@ uint32_t payout_for_cards(const std::array<SimCard, 5>& cards, uint32_t bet) {
         }
     }
 
-    if (quads) return bet * 25;
-    if (trips && pairs) return bet * 9;
-    if (flush) return bet * 6;
-    if (straight) return bet * 4;
-    if (trips) return bet * 3;
-    if (pairs >= 2) return bet * 2;
-    if (high_pairs) return bet;
+    if (quads) return payout_for_result(FOUROFAKIND, bet, variant);
+    if (trips && pairs) return payout_for_result(FULLHOUSE, bet, variant);
+    if (flush) return payout_for_result(FLUSH, bet, variant);
+    if (straight) return payout_for_result(STRAIGHT, bet, variant);
+    if (trips) return payout_for_result(THREEOFAKIND, bet, variant);
+    if (pairs >= 2) return payout_for_result(TWOPAIR, bet, variant);
+    if (high_pairs) return payout_for_result(HIGHPAIR, bet, variant);
 
     return 0;
 }
@@ -89,6 +91,7 @@ std::array<SimCard, 52> make_deck() {
 int main(int argc, char* argv[]) {
     std::string engine = "solver";
     std::string ml_model_path;
+    GameVariant variant = GameVariant::JACKS_OR_BETTER_9_6;
     std::vector<std::string> positional;
 
     for (int i = 1; i < argc; i++) {
@@ -99,6 +102,15 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             engine = argv[++i];
+        } else if (arg == "--variant") {
+            if (i + 1 >= argc) {
+                std::cout << "Error - --variant requires value: jacks_or_better_9_6|jacks_or_better_8_5" << std::endl;
+                return 1;
+            }
+            if (!parse_game_variant_id(argv[++i], variant)) {
+                std::cout << "Error - invalid variant: " << argv[i] << std::endl;
+                return 1;
+            }
         } else if (arg == "--ml-model") {
             if (i + 1 >= argc) {
                 std::cout << "Error - --ml-model requires model path" << std::endl;
@@ -111,7 +123,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (positional.size() < 2 || positional.size() > 4) {
-        std::cout << "Usage: verify_rtp [--engine solver|rule|ml] [--ml-model model.json] hands_per_run runs [bet=5] [seed=12345]" << std::endl;
+        std::cout << "Usage: verify_rtp [--engine solver|rule|ml] [--variant jacks_or_better_9_6|jacks_or_better_8_5] [--ml-model model.json] hands_per_run runs [bet=5] [seed=12345]" << std::endl;
         return 1;
     }
 
@@ -146,7 +158,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    const double target_rtp = 0.995439;
+    const GameVariantInfo& variant_info = game_variant_info(variant);
+    const double target_rtp = variant_info.optimal_rtp;
     const std::array<SimCard, 52> full_deck = make_deck();
 
     AutoHold::set_verbose(false);
@@ -172,7 +185,7 @@ int main(int argc, char* argv[]) {
             };
 
             std::array<Card*, 5> card_ptrs = {&cards[0], &cards[1], &cards[2], &cards[3], &cards[4]};
-            AutoHold::auto_hold(card_ptrs, bet);
+            AutoHold::auto_hold(card_ptrs, bet, variant);
 
             std::array<SimCard, 5> final_cards = {
                 SimCard{static_cast<uint8_t>(cards[0].suit()), static_cast<uint8_t>(cards[0].rank())},
@@ -189,7 +202,7 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            const uint32_t payout = payout_for_cards(final_cards, bet);
+            const uint32_t payout = payout_for_cards(final_cards, bet, variant);
             const long double x = static_cast<long double>(payout) / static_cast<long double>(bet);
             run_sum_x += x;
             sum_x += x;
@@ -215,6 +228,7 @@ int main(int argc, char* argv[]) {
     std::cout << "\nHands: " << total_hands
               << "  Bet: " << bet
               << "  Engine: " << engine
+              << "  Variant: " << variant_info.id
               << "  Seed base: " << base_seed << std::endl;
     std::cout << "Estimated RTP: " << std::fixed << std::setprecision(6)
               << static_cast<double>(mean) << " (" << static_cast<double>(mean * 100.0L) << "%)" << std::endl;
