@@ -121,7 +121,6 @@ Response:
 }
 ```
 
-
 ### ML Data Generation & Training
 1. **Generate Data:** `./videopoker --engine solver --dump-training training.jsonl 1000000 1 100000`
 2. **Train Model:** `python3 poker-core/python/train_ml_engine.py training.jsonl model.json`
@@ -140,4 +139,5 @@ The mobile applications in `android-app/` and `ios-app/` provide a rich training
 ---
 
 ## 📄 License
-This project is for educational and simulation purposes. Check individual platform READMEs for specific build requirements (Android Studio / Xcode).
+
+© 2026 Gordon Pusnik. All rights reserved.
