@@ -1,241 +1,230 @@
 # Equilibrium
 
-![C++](https://img.shields.io/badge/C%2B%2B-17-blue)
-![Python](https://img.shields.io/badge/Python-3.x-yellow)
-![FastAPI](https://img.shields.io/badge/API-FastAPI-green)
-![Docker](https://img.shields.io/badge/Container-Docker-blue)
-![iOS](https://img.shields.io/badge/iOS-SwiftUI-black)
-![Android](https://img.shields.io/badge/Android-Kotlin-brightgreen)
-![Solver](https://img.shields.io/badge/Strategy-EV%20Solver-orange)
-![ML](https://img.shields.io/badge/MachineLearning-MLP-purple)
-
-A high-performance, multi-platform training suite built on **Equilibrium**, a C++ strategy solver designed to compute mathematically optimal play using exhaustive expected value analysis and simulation.
-
-The project includes:
-
-* a high-performance C++ engine
-* machine learning strategy models
-* mobile trainer applications
-* a Dockerized REST API
-* command-line simulation tools
-
-The system is capable of evaluating millions of game states to determine optimal decisions.
-
----
-
-# Overview
-
-This project provides a complete ecosystem for **poker strategy analysis and training**.
-
-The core engine performs exhaustive analysis of every possible hold decision to determine the **expected value maximizing strategy** for a given hand.
-
-Applications built on top of the engine include:
-
-* mobile trainer apps
-* command-line simulators
-* machine learning training pipelines
-* REST API microservices
-
----
-
-# Key Features
-
-## High-Performance Core Engine (C++)
-
-The Equilibrium engine provides extremely fast card evaluation and strategy computation.
-
-Features include:
-
-* Modern **C++17 implementation**
-* Memory-safe architecture using `std::unique_ptr`
-* Standard containers (`std::vector`, `std::array`)
-* Thread-local caching for performance
-* Bitmask-based hand evaluation
-* Multi-threaded simulation tools
-
-### Bitmask Hand Evaluation
-
-Hand evaluation uses optimized **bitwise operations** for fast detection of:
-
-* straights
-* flushes
-* rank frequencies
-
-This enables constant-time evaluation for most operations.
-
----
-
-## Exhaustive Optimal Solver
-
-The strategy engine computes the **true optimal play** for each hand.
-
-For every deal:
-
-* All **32 possible hold combinations** are tested
-* Each hold is simulated against **all remaining deck permutations**
-* Expected value (EV) is computed
-* The EV-maximizing strategy is selected
-
-This guarantees mathematically optimal play.
-
----
-
-## Multi-Threaded Simulation
-
-Simulation tools utilize all available CPU cores.
-
-Used for:
-
-* RTP verification
-* EV analysis
-* large-scale training data generation
-
-This allows millions of hands to be simulated quickly.
-
----
-
-# Machine Learning Strategy Engine
-
-The system includes a lightweight machine learning pipeline.
-
-Features include:
-
-* Tiny **MLP neural network**
-* Implementations in **C++ and Python**
-* Fast training pipeline
-* Solver-generated training datasets
-
-Training workflow:
-
-1. Generate solver-perfect training data
-2. Train neural network model
-3. Use model for extremely fast approximate strategy decisions
-
-This allows experimentation with **ML-based strategy engines**.
-
----
-
-# Mobile Trainer Applications
-
-The project includes full mobile applications for both major platforms.
-
-## Android App
-
-* Kotlin
-* Jetpack Compose UI
-* JNI integration with the C++ engine
-
-## iOS App
-
-* Swift
-* SwiftUI interface
-* Objective-C++ bridge to the C++ core
-
-Both mobile apps use the **same C++ strategy engine**, ensuring identical optimal decisions.
-
----
-
-# Windows Desktop Trainer
-
-The `csharp-app/` project adds a Windows Forms interface for anyone who wants desktop access to the solver. Enter any five-card hand, and the client calls the FastAPI `/v1/video-poker/strategy` and `/v1/poker/evaluate` endpoints to display the recommended holds, EV per coin, and the current hand rank—no mobile build required.
-
----
-
-# Mobile Trainer Features
-
-The mobile trainers provide an interactive learning environment.
-
-Features include:
-
-### Real-Time Strategy Feedback
-
-When playing manually, the app evaluates your decisions against the optimal solver.
-
-* correct holds highlighted in **green**
-* incorrect holds highlighted in **red**
-
-### Autohold Mode
-
-Automatically holds EV-optimal cards for each hand.
-
-Useful for learning correct strategy patterns.
-
-### Winning Hand Highlights
-
-Cards contributing to a winning payout are displayed with:
-
-* yellow borders
-* "WIN" badge indicators
-
-### Held Card Indicators
-
-Cards selected for hold display a **HELD badge**.
-
-### Dynamic Random Seeding
-
-Each application launch generates a new randomized deck ensuring varied gameplay.
-
----
-
-# REST API Microservice
-
-The engine can be accessed via a REST API implemented with:
-
-* **FastAPI**
-* **Uvicorn**
-
-The API is fully **Dockerized** for easy deployment.
-
----
-
-## Optimal Strategy Endpoint
-
-Submit a hand and receive the optimal hold decision.
-
-Example request:
-
-```bash
-POST /v1/video-poker/strategy
+Equilibrium is a multi-platform video poker trainer and analysis suite built around a shared C++ core. It currently supports two Jacks or Better paytables, exposes solver, rule, and ML autohold engines, ships mobile trainer apps for Android and iOS, and includes CLI and FastAPI interfaces for simulation and integration.
+
+## Current Features
+
+- Shared C++17 poker engine used by CLI tools, Android, iOS, and the API
+- Two supported game variants:
+  - `jacks_or_better_9_6`
+  - `jacks_or_better_8_5`
+- Three autohold engines:
+  - `solver`: exhaustive EV search over all 32 hold masks
+  - `rule`: handcrafted strategy table
+  - `ml`: local JSON neural-network inference
+- RTP verification tool for comparing engines against optimal play
+- Training-data export and Python ML trainer
+- Android app with Compose + JNI bridge
+- iOS app with SwiftUI + Objective-C++ bridge
+- FastAPI server backed by the same native trainer API
+
+## Supported Variants
+
+| Variant ID | Display Name | Optimal RTP |
+| --- | --- | --- |
+| `jacks_or_better_9_6` | Jacks or Better 9/6 | `99.5439%` |
+| `jacks_or_better_8_5` | Jacks or Better 8/5 | `97.2985%` |
+
+The current paytable difference is the standard 9/6 vs 8/5 change:
+
+- `9/6`: Full House `9x`, Flush `6x`
+- `8/5`: Full House `8x`, Flush `5x`
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A[poker-core/c++]
+    A --> B[build/videopoker]
+    A --> C[build/verify_rtp]
+    A --> D[trainer_api.cpp]
+    D --> E[FastAPI api-server]
+    D --> F[Android app]
+    D --> G[iOS app]
+    B --> H[Training JSONL]
+    H --> I[poker-core/python/train_ml_engine.py]
+    I --> J[ml/*.json models]
+    J --> B
+    J --> C
+    J --> E
+    J --> F
+    J --> G
 ```
 
-Example payload:
+## Repository Layout
+
+- `poker-core/c++`: core engine, solver, rule engine, ML inference, trainer API
+- `poker-core/python`: ML training script
+- `ml`: trained JSON models such as `modeljob96.json` and `modeljob85.json`
+- `api-server`: FastAPI app and Dockerfile
+- `android-app`: Android Studio project
+- `ios-app`: Xcode project
+- `csharp-app`: Windows Forms client for the API
+- `resources/cards`: shared card image assets
+
+## Build
+
+Build the CLI binaries from the repo root:
+
+```bash
+bash ./build.sh
+```
+
+This produces:
+
+- `build/videopoker`
+- `build/verify_rtp`
+
+## CLI
+
+### `videopoker`
+
+Usage:
+
+```bash
+./build/videopoker \
+  [--engine solver|rule|ml] \
+  [--variant jacks_or_better_9_6|jacks_or_better_8_5] \
+  [--ml-model /abs/path/to/model.json] \
+  [--print-strategy] \
+  [--dump-training training.jsonl] \
+  coins bet iterations
+```
+
+Notes:
+
+- `solver` is the default engine
+- `jacks_or_better_9_6` is the default variant
+- `--ml-model` is required when `--engine ml`
+- `--dump-training` writes solver-generated JSONL rows for ML training
+
+Examples:
+
+```bash
+./build/videopoker --variant jacks_or_better_9_6 100 5 10
+./build/videopoker --engine rule --variant jacks_or_better_8_5 100 5 10
+./build/videopoker --engine ml --variant jacks_or_better_9_6 --ml-model ml/modeljob96.json 100 5 10
+./build/videopoker --engine solver --variant jacks_or_better_8_5 --dump-training training85.jsonl 1000000 1 100000
+```
+
+### `verify_rtp`
+
+Usage:
+
+```bash
+./build/verify_rtp \
+  [--engine solver|rule|ml] \
+  [--variant jacks_or_better_9_6|jacks_or_better_8_5] \
+  [--ml-model /abs/path/to/model.json] \
+  hands_per_run runs [bet=5] [seed=12345]
+```
+
+Examples:
+
+```bash
+./build/verify_rtp --variant jacks_or_better_9_6 50000 3 5 12345
+./build/verify_rtp --engine rule --variant jacks_or_better_8_5 100000 5 5 12345
+./build/verify_rtp --engine ml --variant jacks_or_better_9_6 --ml-model ml/modeljob96.json 100000 3 5 12345
+```
+
+The tool prints per-run RTP, an overall estimate, a 95% confidence interval, the target RTP for the selected variant, and the delta to target.
+
+## ML Workflow
+
+Generate solver training data:
+
+```bash
+./build/videopoker \
+  --engine solver \
+  --variant jacks_or_better_9_6 \
+  --dump-training training96.jsonl \
+  1000000 1 100000
+```
+
+Train a model:
+
+```bash
+python3 poker-core/python/train_ml_engine.py training96.jsonl model96.json
+```
+
+Evaluate the trained model:
+
+```bash
+./build/verify_rtp \
+  --engine ml \
+  --variant jacks_or_better_9_6 \
+  --ml-model model96.json \
+  100000 3 5 12345
+```
+
+The mobile apps currently bundle variant-specific ML models:
+
+- `ml/modeljob96.json` for `jacks_or_better_9_6`
+- `ml/modeljob85.json` for `jacks_or_better_8_5`
+
+## API
+
+The API lives in `api-server/main.py` and loads `api-server/libvideopoker.so` at startup.
+
+Run locally after building the shared library expected by the API, or use the Docker setup:
+
+```bash
+bash ./build_docker.sh
+```
+
+Default URLs:
+
+- `http://localhost:8000/`
+- `http://localhost:8000/docs`
+- `http://localhost:8000/openapi.json`
+
+### `POST /v1/video-poker/strategy`
+
+Request:
 
 ```json
 {
-  "variant": "jacks_or_better",
-  "hand": ["Ah","Kh","Qh","Jh","2c"],
+  "variant": "jacks_or_better_9_6",
+  "hand": ["KS", "10H", "5H", "10D", "2H"],
   "bet": 5,
   "engine": "solver"
 }
 ```
 
-Example response:
+For `engine: "ml"`, also provide:
 
 ```json
 {
-  "hold": ["Ah","Kh","Qh","Jh"],
-  "ev": 1.21,
-  "ev_per_coin": 0.242
+  "model_path": "/absolute/path/to/model.json"
 }
 ```
 
----
-
-## Hand Evaluation Endpoint
-
-Evaluate any five-card poker hand.
-
-Example request:
-
-```bash
-POST /v1/poker/evaluate
-```
-
-Payload:
+Response:
 
 ```json
 {
-  "hand": ["Ah","Kh","Qh","Jh","10h"]
+  "variant": "jacks_or_better_9_6",
+  "hold": ["10H", "10D"],
+  "ev": 1.536745,
+  "ev_per_coin": 0.307349
+}
+```
+
+Rules:
+
+- `variant` defaults to `jacks_or_better_9_6`
+- `engine` defaults to `solver`
+- valid engines are `solver`, `rule`, and `ml`
+- valid variants are `jacks_or_better_9_6` and `jacks_or_better_8_5`
+- `model_path` is required for ML requests
+
+### `POST /v1/poker/evaluate`
+
+Request:
+
+```json
+{
+  "hand": ["Ah", "Kh", "Qh", "Jh", "10h"]
 }
 ```
 
@@ -248,151 +237,54 @@ Response:
 }
 ```
 
-Ranking system:
+## Mobile Apps
 
-* **1 = Best possible hand**
-* **7462 = Worst possible hand**
+### Android
 
----
+Open `android-app/` in Android Studio and run the `app` module. The app uses Jetpack Compose and a JNI bridge into the shared C++ trainer API.
 
-# Command-Line Simulation Tools
+Current Android features:
 
-High-performance CLI tools are included for research and validation.
+- game dropdown with `Jacks or Better 9/6` and `Jacks or Better 8/5`
+- expected RTP label for the selected variant
+- variant-aware paytable that updates with the current bet
+- engine selector for solver, rule, and ML/AI mode
+- autohold toggle
+- `Deal` / `Draw` flow that matches the iOS app
+- engine switching after a deal to compare recommended holds on the same hand
+- expandable explanation panel with strategy text
+- solver-only EV detail rows for best EV, next best hold, and EV edge
+- bundled variant-specific ML models
 
-## Gameplay Simulation
+### iOS
 
-```bash
-./videopoker 100 1 10
-```
+Open `ios-app/VideoPokerTrainer.xcodeproj` in Xcode and run the `VideoPokerTrainer` scheme on a simulator or device. The app uses SwiftUI with an Objective-C++ bridge into the same trainer API.
 
-Parameters:
+Current iOS features:
 
-```
-[starting_coins] [bet] [iterations]
-```
+- game picker with `Jacks or Better 9/6` and `Jacks or Better 8/5`
+- expected RTP label for the selected variant
+- variant-aware paytable that updates with the current bet
+- engine picker for solver, rule, and ML
+- autohold toggle
+- `Deal` / `Draw` flow
+- engine switching after a deal to compare suggested holds
+- expandable explanation panel
+- solver-only EV comparison details
+- bundled variant-specific ML models
 
----
+## Notes On ML Quality
 
-## RTP Verification
+The ML engine is in place for experimentation and UI comparison, but it is currently weaker than the rule and solver engines. Use `verify_rtp` to measure the gap for a specific model and variant before treating it as production-quality strategy.
 
-Verify theoretical return-to-player percentages.
+## Windows Desktop App
 
-```bash
-./verify_rtp --engine solver 10000 20 5 12345
-```
+`csharp-app/` is a Windows Forms client targeting `net8.0-windows`. It is Windows-only in its current form and calls the API rather than embedding the native engine directly.
 
-Parameters:
-
-```
-[hands_per_run] [runs] [bet] [seed]
-```
-
----
-
-# Machine Learning Training Pipeline
-
-Training data can be generated directly from the solver.
-
-Generate dataset:
-
-```bash
-./videopoker --engine solver --dump-training training.jsonl 1000000 1 100000
-```
-
-Train model:
-
-```bash
-python3 poker-core/python/train_ml_engine.py training.jsonl model.json
-```
-
-Run engine with ML strategy:
-
-```bash
-./videopoker --engine ml --ml-model model.json 100 1 50
-```
-
----
-
-# Repository Structure
-
-```
-poker-core/
-  c++/       Core engine, solver, evaluators
-  python/    ML training pipeline
-
-android-app/  Android trainer application
-ios-app/      iOS trainer application
-csharp-app/   Windows desktop trainer application
-api-server/   FastAPI microservice
-resources/    Graphical assets
-```
-
----
-
-# Extensibility
-
-The system is designed to support additional video poker variants by extending the payout logic.
-
-Planned future variants include:
-
-* Deuces Wild
-* Bonus Poker
-* Double Bonus Poker
-
-The architecture also allows expansion into other card games.
-
----
-
-System Architecture
-
-The Trainer ecosystem is powered by the Equilibrium strategy engine, which can be accessed through multiple interfaces including mobile applications, command-line tools, and a REST API.
-
-```mermaid
-flowchart TD
-
-A[Equilibrium C++ Engine]
-B[Strategy Solver]
-C[Hand Evaluator]
-D[Monte Carlo Simulation]
-E[ML Strategy Engine]
-
-A --> B
-A --> C
-A --> D
-A --> E
-
-F[FastAPI Service]
-G[CLI Tools]
-H[iOS Trainer App]
-I[Android Trainer App]
-
-B --> F
-C --> F
-D --> G
-E --> G
-
-F --> H
-F --> I
-```
-
-The Equilibrium engine provides the core functionality used by:
-
-mobile trainer applications
-
-command-line simulation tools
-
-REST API microservices
-
-machine learning training pipelines
-
----
-
-# Author
+## Author
 
 Gordon Pusnik
 
----
-
-# License
+## License
 
 © 2026 Gordon Pusnik. All rights reserved.

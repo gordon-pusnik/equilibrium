@@ -1,33 +1,71 @@
-# iOS Video Poker Trainer (SwiftUI + Objective-C++)
+# iOS Video Poker Trainer
 
-This folder contains a starter iOS app scaffold that uses the C++ poker engine through an Objective-C++ bridge.
+This is the iOS trainer app for Equilibrium. It is a working Xcode project built with SwiftUI and an Objective-C++ bridge into the shared C++ trainer API in `poker-core/c++`.
 
-## Structure
+## Project Layout
 
-- `VideoPokerTrainer/App/`: SwiftUI app UI
-- `VideoPokerTrainer/Engine/`: Objective-C++ bridge (`PokerEngineBridge.mm`) calling `poker-core/c++/trainer_api.*`
-- `VideoPokerTrainer/Resources/VideoPokerTrainer-Bridging-Header.h`: Swift bridging header
+- `VideoPokerTrainer.xcodeproj`: Xcode project
+- `VideoPokerTrainer/App`: SwiftUI screens and app flow
+- `VideoPokerTrainer/Engine`: Objective-C++ bridge files
+- `VideoPokerTrainer/Resources`: card images, plist, bridging header, bundled ML models
 
-## What You Need To Do In Xcode
+## Open And Run
 
-1. Create a new **iOS App** project named `VideoPokerTrainer` (SwiftUI + Swift).
-2. Replace generated Swift files with files from `ios/VideoPokerTrainer/App/`.
-3. Add `PokerEngineBridge.h/.mm` to the Xcode project.
-4. Add C++ engine sources to the target build:
-   - `poker-core/c++/card.cpp`, `poker-core/c++/deck.cpp`, `poker-core/c++/hand.cpp`, `poker-core/c++/checkforwin.cpp`, `poker-core/c++/autohold.cpp`, `poker-core/c++/trainer_api.cpp`, `poker-core/c++/evaluator.cpp`
-5. Add headers to Header Search Paths (recursive):
-   - `$(PROJECT_DIR)/../../poker-core/c++`
-6. Set Objective-C Bridging Header to:
-   - `VideoPokerTrainer/Resources/VideoPokerTrainer-Bridging-Header.h`
-7. Ensure source files with C++ calls are compiled as Objective-C++ (`.mm`).
+1. Open `ios-app/VideoPokerTrainer.xcodeproj` in Xcode.
+2. Select the `VideoPokerTrainer` scheme.
+3. Set your Apple signing team if you want to run on a physical device.
+4. Build and run on a simulator or device.
 
-## UI Features Included
+Command-line build verification example:
 
-- Engine selector: `solver`, `rule`, `ml`
-- Bet selector (`1...5`)
-- ML model path field (shown when `ml` selected)
-- `Deal`: deals a hand and allows manual selection (unless Autohold is ON)
-- Tap initial cards to manually toggle held state
-- `Draw`: draws using user-selected hold mask
-- Graphical card row for final hand with winning cards highlighted
-- Payout display
+```bash
+/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild \
+  -project ios-app/VideoPokerTrainer.xcodeproj \
+  -scheme VideoPokerTrainer \
+  -configuration Debug \
+  -destination 'generic/platform=iOS' \
+  -derivedDataPath /tmp/vpt-derived-data \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+## Current Features
+
+- Game picker:
+  - `Jacks or Better 9/6`
+  - `Jacks or Better 8/5`
+- Expected RTP display for the selected variant
+- Paytable display that updates with the current bet
+- Engine picker for solver, rule, and ML
+- `Deal` / `Draw` hand flow
+- `Autohold` toggle
+- Manual hold selection when autohold is off
+- Switch engines after dealing to compare recommended holds on the same hand
+- Expandable explanation panel for the recommended hold
+- Solver-only EV detail rows for best EV, next-best hold, and EV edge
+- Winning-card highlighting in the final hand
+
+## ML Models
+
+The app no longer exposes a model-path field. In ML mode it loads a bundled model based on the selected variant:
+
+- `jacks_or_better_9_6` -> `VideoPokerTrainer/Resources/modeljob96.json`
+- `jacks_or_better_8_5` -> `VideoPokerTrainer/Resources/modeljob85.json`
+
+## Bridge Responsibilities
+
+The Objective-C++ bridge exposes the shared trainer API to SwiftUI for:
+
+- handle creation and destruction
+- engine selection
+- variant selection
+- ML model loading
+- deal and draw operations
+- hold recalculation for an already-dealt hand
+- hold explanation lookup
+- solver EV comparison analysis
+
+## Notes
+
+- The iOS app uses the same native strategy logic as Android and the CLI tools.
+- The ML engine is currently useful for side-by-side comparison, but the rule and solver engines remain the stronger references.
