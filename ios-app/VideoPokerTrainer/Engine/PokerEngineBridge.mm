@@ -82,6 +82,20 @@
     return ok;
 }
 
+- (BOOL)setVariant:(NSString *)variantId error:(NSError * _Nullable * _Nullable)error {
+    if (_handle == nullptr) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"PokerEngine" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Engine not initialized"}];
+        }
+        return NO;
+    }
+    const BOOL ok = vp_set_variant(_handle, variantId.UTF8String) == 1;
+    if (!ok && error) {
+        *error = [NSError errorWithDomain:@"PokerEngine" code:9 userInfo:@{NSLocalizedDescriptionKey: @"Invalid game variant"}];
+    }
+    return ok;
+}
+
 - (nullable NSDictionary *)dealSuggestedWithBet:(NSInteger)bet error:(NSError * _Nullable * _Nullable)error {
     if (_handle == nullptr) {
         if (error) {
@@ -210,7 +224,7 @@
     }
 
     VPSolverAnalysis analysis = {};
-    if (vp_analyze_solver(cSuits, cRanks, (uint32_t)bet, &analysis) != 1) {
+    if (vp_analyze_solver(_handle, cSuits, cRanks, (uint32_t)bet, &analysis) != 1) {
         if (error) {
             *error = [NSError errorWithDomain:@"PokerEngine" code:8 userInfo:@{NSLocalizedDescriptionKey: @"Failed to analyze solver EVs"}];
         }

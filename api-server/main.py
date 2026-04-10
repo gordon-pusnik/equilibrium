@@ -13,13 +13,14 @@ RANKS = {
 
 class StrategyRequest(BaseModel):
     model_config = {"protected_namespaces": ()}
-    variant: str = Field(..., description="Game variant, e.g., 'jacks_or_better'")
+    variant: str = Field("jacks_or_better_9_6", description="Game variant id")
     hand: List[str] = Field(..., min_length=5, max_length=5, description="List of 5 card strings, e.g., ['Ah', 'Kh', 'Qh', 'Jh', '2c']")
     bet: int = Field(5, ge=1, le=5)
     engine: str = Field("solver", description="Engine type: 'solver', 'rule', or 'ml'")
     model_path: Optional[str] = Field(None, description="Path to ML model JSON file (required if engine is 'ml')")
 
 class StrategyResponse(BaseModel):
+    variant: str
     hold: List[str]
     ev: float
     ev_per_coin: float
@@ -60,6 +61,10 @@ def load_lib():
     # int vp_set_engine(VPHandle handle, const char* engine_name);
     lib.vp_set_engine.restype = ctypes.c_int
     lib.vp_set_engine.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+
+    # int vp_set_variant(VPHandle handle, const char* variant_id);
+    lib.vp_set_variant.restype = ctypes.c_int
+    lib.vp_set_variant.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
 
     # int vp_set_ml_model(VPHandle handle, const char* model_path);
     lib.vp_set_ml_model.restype = ctypes.c_int
@@ -117,8 +122,8 @@ def parse_card(card_str: str):
 
 @app.post("/v1/video-poker/strategy", response_model=StrategyResponse)
 async def get_strategy(request: StrategyRequest):
-    if request.variant != "jacks_or_better":
-        raise HTTPException(status_code=400, detail="Currently only 'jacks_or_better' is supported.")
+    if request.variant not in ["jacks_or_better_9_6", "jacks_or_better_8_5"]:
+        raise HTTPException(status_code=400, detail="Variant must be 'jacks_or_better_9_6' or 'jacks_or_better_8_5'.")
     
     if request.engine not in ["solver", "rule", "ml"]:
         raise HTTPException(status_code=400, detail="Engine must be 'solver', 'rule', or 'ml'.")
@@ -138,6 +143,8 @@ async def get_strategy(request: StrategyRequest):
     
     handle = lib.vp_create(0)
     try:
+        if not lib.vp_set_variant(handle, request.variant.encode('utf-8')):
+            raise HTTPException(status_code=400, detail=f"Invalid variant: {request.variant}")
         lib.vp_set_engine(handle, request.engine.encode('utf-8'))
         if request.engine == "ml" and request.model_path:
             if not lib.vp_set_ml_model(handle, request.model_path.encode('utf-8')):
@@ -156,6 +163,7 @@ async def get_strategy(request: StrategyRequest):
                 hold_cards.append(request.hand[i])
         
         return {
+            "variant": request.variant,
             "hold": hold_cards,
             "ev": round(ev, 6),
             "ev_per_coin": round(ev / request.bet, 6)

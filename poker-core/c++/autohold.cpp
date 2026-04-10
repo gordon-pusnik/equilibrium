@@ -1,6 +1,7 @@
 #include "autohold.h"
 #include "card.h"
 #include "checkforwin.h"
+#include "game_variant.h"
 #include "hand.h"
 
 #include <algorithm>
@@ -159,7 +160,7 @@ bool parse_json_float_array_field(const std::string& text, const char* key, std:
     return !out_values.empty();
 }
 
-uint64_t hand_cache_key(const std::array<Card*, 5>& cards, uint32_t bet) {
+uint64_t hand_cache_key(const std::array<Card*, 5>& cards, uint32_t bet, GameVariant variant) {
     std::array<uint8_t, 5> ids = {0, 0, 0, 0, 0};
     for (uint8_t i = 0; i < 5; i++) {
         // 0..51 canonical card id
@@ -167,14 +168,14 @@ uint64_t hand_cache_key(const std::array<Card*, 5>& cards, uint32_t bet) {
     }
     std::sort(ids.begin(), ids.end());
 
-    uint64_t key = static_cast<uint64_t>(bet) << 40;
+    uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(variant)) << 48) | (static_cast<uint64_t>(bet) << 40);
     for (uint8_t i = 0; i < 5; i++) {
         key |= static_cast<uint64_t>(ids[i]) << (i * 6);
     }
     return key;
 }
 
-uint32_t payout_for_cards(const std::array<LiteCard, 5>& cards, uint32_t bet) {
+uint32_t payout_for_cards(const std::array<LiteCard, 5>& cards, uint32_t bet, GameVariant variant) {
     uint32_t rank_mask = 0;
     uint64_t rank_counts = 0;
     uint32_t suit_mask = 0;
@@ -201,9 +202,9 @@ uint32_t payout_for_cards(const std::array<LiteCard, 5>& cards, uint32_t bet) {
 
     if (flush && straight) {
         if (rank_mask == 0x7C00) { // 10, J, Q, K, A
-            return (bet == 5) ? (bet * 800) : (bet * 250);
+            return payout_for_result(ROYALFLUSH, bet, variant);
         }
-        return bet * 50;
+        return payout_for_result(STRAIGHTFLUSH, bet, variant);
     }
 
     // Use rank_counts to find pairs, trips, quads
@@ -224,13 +225,13 @@ uint32_t payout_for_cards(const std::array<LiteCard, 5>& cards, uint32_t bet) {
         }
     }
 
-    if (quads) return bet * 25;
-    if (trips && pairs) return bet * 9;
-    if (flush) return bet * 6;
-    if (straight) return bet * 4;
-    if (trips) return bet * 3;
-    if (pairs >= 2) return bet * 2;
-    if (high_pairs) return bet;
+    if (quads) return payout_for_result(FOUROFAKIND, bet, variant);
+    if (trips && pairs) return payout_for_result(FULLHOUSE, bet, variant);
+    if (flush) return payout_for_result(FLUSH, bet, variant);
+    if (straight) return payout_for_result(STRAIGHT, bet, variant);
+    if (trips) return payout_for_result(THREEOFAKIND, bet, variant);
+    if (pairs >= 2) return payout_for_result(TWOPAIR, bet, variant);
+    if (high_pairs) return payout_for_result(HIGHPAIR, bet, variant);
 
     return 0;
 }
@@ -241,6 +242,7 @@ void evaluate_mask_ev(
     uint8_t discard_count,
     const std::array<LiteCard, 5>& base_cards,
     uint32_t bet,
+    GameVariant variant,
     uint64_t& total_payout,
     uint32_t& ways
 ) {
@@ -248,7 +250,7 @@ void evaluate_mask_ev(
     ways = 0;
 
     if (discard_count == 0) {
-        total_payout = payout_for_cards(base_cards, bet);
+        total_payout = payout_for_cards(base_cards, bet, variant);
         ways = 1;
         return;
     }
@@ -260,7 +262,7 @@ void evaluate_mask_ev(
         case 1: {
             for (uint32_t i = 0; i < n; i++) {
                 final_cards[discard_slots[0]] = remaining[i];
-                total_payout += payout_for_cards(final_cards, bet);
+                total_payout += payout_for_cards(final_cards, bet, variant);
             }
             ways = n;
             return;
@@ -270,7 +272,7 @@ void evaluate_mask_ev(
                 final_cards[discard_slots[0]] = remaining[i];
                 for (uint32_t j = i + 1; j < n; j++) {
                     final_cards[discard_slots[1]] = remaining[j];
-                    total_payout += payout_for_cards(final_cards, bet);
+                    total_payout += payout_for_cards(final_cards, bet, variant);
                     ways++;
                 }
             }
@@ -283,7 +285,7 @@ void evaluate_mask_ev(
                     final_cards[discard_slots[1]] = remaining[j];
                     for (uint32_t k = j + 1; k < n; k++) {
                         final_cards[discard_slots[2]] = remaining[k];
-                        total_payout += payout_for_cards(final_cards, bet);
+                        total_payout += payout_for_cards(final_cards, bet, variant);
                         ways++;
                     }
                 }
@@ -299,7 +301,7 @@ void evaluate_mask_ev(
                         final_cards[discard_slots[2]] = remaining[k];
                         for (uint32_t m = k + 1; m < n; m++) {
                             final_cards[discard_slots[3]] = remaining[m];
-                            total_payout += payout_for_cards(final_cards, bet);
+                            total_payout += payout_for_cards(final_cards, bet, variant);
                             ways++;
                         }
                     }
@@ -318,7 +320,7 @@ void evaluate_mask_ev(
                             final_cards[discard_slots[3]] = remaining[m];
                             for (uint32_t p = m + 1; p < n; p++) {
                                 final_cards[discard_slots[4]] = remaining[p];
-                                total_payout += payout_for_cards(final_cards, bet);
+                                total_payout += payout_for_cards(final_cards, bet, variant);
                                 ways++;
                             }
                         }
@@ -920,11 +922,11 @@ uint32_t rule_auto_hold(const std::array<Card*, 5>& cards) {
     return mask;
 }
 
-uint32_t solver_auto_hold(const std::array<Card*, 5>& cards, uint32_t bet, double* out_ev) {
+uint32_t solver_auto_hold(const std::array<Card*, 5>& cards, uint32_t bet, GameVariant variant, double* out_ev) {
     thread_local std::unordered_map<uint64_t, uint8_t> best_mask_cache;
     thread_local std::unordered_map<uint64_t, double> ev_cache;
 
-    const uint64_t cache_key = hand_cache_key(cards, bet);
+    const uint64_t cache_key = hand_cache_key(cards, bet, variant);
 
     for (uint32_t i = 0; i < 5; i++) {
         cards[i]->reset();
@@ -969,7 +971,7 @@ uint32_t solver_auto_hold(const std::array<Card*, 5>& cards, uint32_t bet, doubl
 
         uint64_t total_payout = 0;
         uint32_t ways = 0;
-        evaluate_mask_ev(remaining, discard_slots, discard_count, base_cards, bet, total_payout, ways);
+        evaluate_mask_ev(remaining, discard_slots, discard_count, base_cards, bet, variant, total_payout, ways);
 
         if (!have_best) {
             best_mask = mask;
@@ -1221,7 +1223,7 @@ void AutoHold::print_rule_strategy() {
     for (uint32_t i = 0; i < n; i++) std::cout << (i + 1) << ". " << kRuleStrategyTable[i] << std::endl;
 }
 
-uint32_t AutoHold::auto_hold(const std::array<Card*, 5>& cards, uint32_t bet, double* out_ev) {
+uint32_t AutoHold::auto_hold(const std::array<Card*, 5>& cards, uint32_t bet, GameVariant variant, double* out_ev) {
     if (g_engine == Engine::RULE) {
         if (out_ev) *out_ev = 0.0; // Rule engine doesn't compute EV easily
         return rule_auto_hold(cards);
@@ -1229,7 +1231,7 @@ uint32_t AutoHold::auto_hold(const std::array<Card*, 5>& cards, uint32_t bet, do
         if (out_ev) *out_ev = 0.0; // ML engine doesn't compute EV easily
         return ml_auto_hold(cards, bet);
     }
-    return solver_auto_hold(cards, bet, out_ev);
+    return solver_auto_hold(cards, bet, variant, out_ev);
 }
 
 std::string AutoHold::explain_hold_label(const std::array<Card*, 5>& cards, uint32_t hold_mask) {
@@ -1241,7 +1243,7 @@ std::string AutoHold::explain_hold_summary(const std::array<Card*, 5>& cards, ui
     return explanation_summary_for_label(label);
 }
 
-bool AutoHold::solver_top_two(const std::array<Card*, 5>& cards, uint32_t bet, uint32_t& best_mask, double& best_ev, uint32_t& second_mask, double& second_ev) {
+bool AutoHold::solver_top_two(const std::array<Card*, 5>& cards, uint32_t bet, GameVariant variant, uint32_t& best_mask, double& best_ev, uint32_t& second_mask, double& second_ev) {
     bool in_hand_flags[52] = {false};
     for (uint32_t i = 0; i < 5; i++) {
         const uint32_t deck_idx = (cards[i]->suit() - SPADES) * 13 + (cards[i]->rank() - TWO);
@@ -1277,7 +1279,7 @@ bool AutoHold::solver_top_two(const std::array<Card*, 5>& cards, uint32_t bet, u
 
         uint64_t total_payout = 0;
         uint32_t ways = 0;
-        evaluate_mask_ev(remaining, discard_slots, discard_count, base_cards, bet, total_payout, ways);
+        evaluate_mask_ev(remaining, discard_slots, discard_count, base_cards, bet, variant, total_payout, ways);
 
         if (!have_best) {
             best_mask = mask;

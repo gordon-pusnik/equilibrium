@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Copy the poker-core sources
 COPY poker-core/c++ /app/poker-core/c++
-COPY machine-learning/model.json /app/machine-learning/model.json
+COPY machine-learning/modelv1.json /app/machine-learning/modelv1.json
 COPY machine-learning/modelv2.json /app/machine-learning/modelv2.json
 COPY machine-learning/modelv2.json /app/machine-learning/modelv3.json
 
@@ -23,6 +23,7 @@ RUN g++ -std=c++17 -O3 -fPIC -shared \
     /app/poker-core/c++/hand.cpp \
     /app/poker-core/c++/checkforwin.cpp \
     /app/poker-core/c++/autohold.cpp \
+    /app/poker-core/c++/game_variant.cpp \
     /app/poker-core/c++/trainer_api.cpp \
     /app/poker-core/c++/evaluator.cpp \
     -o /app/libvideopoker.so

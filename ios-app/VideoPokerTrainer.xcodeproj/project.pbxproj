@@ -18,7 +18,9 @@
 		AA0000000000000000001009 /* trainer_api.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002018 /* trainer_api.cpp */; };
 		AA0000000000000000001010 /* evaluator.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002020 /* evaluator.cpp */; };
 		AA0000000000000000001011 /* cards in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002006 /* cards */; };
-		AA0000000000000000001012 /* model.json in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002023 /* model.json */; };
+		AA0000000000000000001012 /* modeljob96.json in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002023 /* modeljob96.json */; };
+		AA0000000000000000001013 /* game_variant.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002024 /* game_variant.cpp */; };
+		AA0000000000000000001014 /* modeljob85.json in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002026 /* modeljob85.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -44,7 +46,10 @@
 		AA0000000000000000002020 /* evaluator.cpp */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.objcpp; fileEncoding = 4; name = evaluator.cpp; path = "../poker-core/c++/evaluator.cpp"; sourceTree = SOURCE_ROOT; };
 		AA0000000000000000002021 /* evaluator.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = evaluator.h; path = "../poker-core/c++/evaluator.h"; sourceTree = SOURCE_ROOT; };
 		AA0000000000000000002022 /* VideoPokerTrainer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VideoPokerTrainer.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		AA0000000000000000002023 /* model.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = model.json; sourceTree = "<group>"; };
+		AA0000000000000000002023 /* modeljob96.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = modeljob96.json; sourceTree = "<group>"; };
+		AA0000000000000000002024 /* game_variant.cpp */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.objcpp; fileEncoding = 4; name = game_variant.cpp; path = "../poker-core/c++/game_variant.cpp"; sourceTree = SOURCE_ROOT; };
+		AA0000000000000000002025 /* game_variant.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = game_variant.h; path = "../poker-core/c++/game_variant.h"; sourceTree = SOURCE_ROOT; };
+		AA0000000000000000002026 /* modeljob85.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = modeljob85.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -101,7 +106,8 @@
 			children = (
 				AA0000000000000000002005 /* VideoPokerTrainer-Bridging-Header.h */,
 				AA0000000000000000002006 /* cards */,
-				AA0000000000000000002023 /* model.json */,
+				AA0000000000000000002023 /* modeljob96.json */,
+				AA0000000000000000002026 /* modeljob85.json */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -127,6 +133,8 @@
 				AA0000000000000000002011 /* deck.h */,
 				AA0000000000000000002020 /* evaluator.cpp */,
 				AA0000000000000000002021 /* evaluator.h */,
+				AA0000000000000000002024 /* game_variant.cpp */,
+				AA0000000000000000002025 /* game_variant.h */,
 				AA0000000000000000002012 /* hand.cpp */,
 				AA0000000000000000002013 /* hand.h */,
 				AA0000000000000000002018 /* trainer_api.cpp */,
@@ -191,7 +199,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				AA0000000000000000001011 /* cards in Resources */,
-				AA0000000000000000001012 /* model.json in Resources */,
+				AA0000000000000000001012 /* modeljob96.json in Resources */,
+				AA0000000000000000001014 /* modeljob85.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -208,6 +217,7 @@
 				AA0000000000000000001002 /* ContentView.swift in Sources */,
 				AA0000000000000000001005 /* deck.cpp in Sources */,
 				AA0000000000000000001010 /* evaluator.cpp in Sources */,
+				AA0000000000000000001013 /* game_variant.cpp in Sources */,
 				AA0000000000000000001006 /* hand.cpp in Sources */,
 				AA0000000000000000001003 /* PokerEngineBridge.mm in Sources */,
 				AA0000000000000000001009 /* trainer_api.cpp in Sources */,
