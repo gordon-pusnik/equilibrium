@@ -1,5 +1,5 @@
 build/
-app/
+.cxx/
 *.o
 *.out
 *.log
@@ -13,7 +13,7 @@ DerivedData/
 Debug/
 .idea
 .DS_Store
-machine-learning/
+*.jsonl
 
 # Visual Studio / C# artifacts
 .vs/

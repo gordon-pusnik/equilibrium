@@ -10,6 +10,7 @@
 #include "card.h"
 #include "checkforwin.h"
 #include "deck.h"
+#include "game_variant.h"
 #include "hand.h"
 #include "evaluator.h"
 
@@ -17,7 +18,7 @@ namespace {
 class TrainerContext {
 public:
     explicit TrainerContext(uint64_t seed)
-        : m_deck(std::make_unique<Deck>()), m_have_deal(false) {
+        : m_deck(std::make_unique<Deck>()), m_have_deal(false), m_variant(GameVariant::JACKS_OR_BETTER_9_6) {
         m_deck->init(static_cast<uint32_t>(seed));
     }
 
@@ -31,6 +32,14 @@ public:
         return AutoHold::set_ml_model(model_path);
     }
 
+    bool set_variant(const char* variant_id) {
+        return parse_game_variant_id(variant_id, m_variant);
+    }
+
+    GameVariant variant() const {
+        return m_variant;
+    }
+
     bool play_hand(uint32_t bet, VPHandState* out_state) {
         if (out_state == nullptr || bet == 0 || bet > 5) {
             return false;
@@ -38,7 +47,7 @@ public:
 
         m_deck->shuffle();
         m_deck->new_hand();
-        m_deck->hand()->auto_hold(bet);
+        m_deck->hand()->auto_hold(bet, m_variant);
 
         auto initial_cards = m_deck->hand()->cards();
         uint32_t hold_mask = 0;
@@ -66,19 +75,7 @@ public:
             out_state->final_cards[i].winning = final_cards[i]->is_kept() ? 1u : 0u;
         }
 
-        switch (win_type) {
-            case NONE: out_state->payout = 0; break;
-            case HIGHPAIR: out_state->payout = bet * 1; break;
-            case TWOPAIR: out_state->payout = bet * 2; break;
-            case THREEOFAKIND: out_state->payout = bet * 3; break;
-            case STRAIGHT: out_state->payout = bet * 4; break;
-            case FLUSH: out_state->payout = bet * 6; break;
-            case FULLHOUSE: out_state->payout = bet * 9; break;
-            case FOUROFAKIND: out_state->payout = bet * 25; break;
-            case STRAIGHTFLUSH: out_state->payout = bet * 50; break;
-            case ROYALFLUSH: out_state->payout = (bet == 5) ? (bet * 800) : (bet * 250); break;
-            default: out_state->payout = 0; break;
-        }
+        out_state->payout = payout_for_result(win_type, bet, m_variant);
 
         return true;
     }
@@ -90,7 +87,7 @@ public:
 
         m_deck->shuffle();
         m_deck->new_hand();
-        m_deck->hand()->auto_hold(bet);
+        m_deck->hand()->auto_hold(bet, m_variant);
 
         auto cards = m_deck->hand()->cards();
         uint32_t hold_mask = 0;
@@ -144,19 +141,7 @@ public:
         }
         out_state->hold_mask = hold_mask;
 
-        switch (win_type) {
-            case NONE: out_state->payout = 0; break;
-            case HIGHPAIR: out_state->payout = bet * 1; break;
-            case TWOPAIR: out_state->payout = bet * 2; break;
-            case THREEOFAKIND: out_state->payout = bet * 3; break;
-            case STRAIGHT: out_state->payout = bet * 4; break;
-            case FLUSH: out_state->payout = bet * 6; break;
-            case FULLHOUSE: out_state->payout = bet * 9; break;
-            case FOUROFAKIND: out_state->payout = bet * 25; break;
-            case STRAIGHTFLUSH: out_state->payout = bet * 50; break;
-            case ROYALFLUSH: out_state->payout = (bet == 5) ? (bet * 800) : (bet * 250); break;
-            default: out_state->payout = 0; break;
-        }
+        out_state->payout = payout_for_result(win_type, bet, m_variant);
 
         m_have_deal = false;
         return true;
@@ -173,7 +158,7 @@ public:
         std::array<Card*, 5> card_ptrs = {&card_objs[0], &card_objs[1], &card_objs[2], &card_objs[3], &card_objs[4]};
         
         double ev = 0.0;
-        uint32_t mask = AutoHold::auto_hold(card_ptrs, bet, &ev);
+        uint32_t mask = AutoHold::auto_hold(card_ptrs, bet, m_variant, &ev);
         if (out_mask) *out_mask = mask;
         return ev;
     }
@@ -181,6 +166,7 @@ public:
 private:
     std::unique_ptr<Deck> m_deck;
     bool m_have_deal;
+    GameVariant m_variant;
 };
 } // namespace
 
@@ -200,6 +186,11 @@ int vp_set_engine(VPHandle handle, const char* engine_name) {
 int vp_set_ml_model(VPHandle handle, const char* model_path) {
     if (handle == nullptr || model_path == nullptr) return 0;
     return static_cast<TrainerContext*>(handle)->set_ml_model(model_path) ? 1 : 0;
+}
+
+int vp_set_variant(VPHandle handle, const char* variant_id) {
+    if (handle == nullptr || variant_id == nullptr) return 0;
+    return static_cast<TrainerContext*>(handle)->set_variant(variant_id) ? 1 : 0;
 }
 
 int vp_play_hand(VPHandle handle, uint32_t bet, VPHandState* out_state) {
@@ -262,8 +253,8 @@ void vp_explain_hold(const uint32_t* suits, const uint32_t* ranks, uint32_t hold
     out_explanation->summary[sizeof(out_explanation->summary) - 1] = '\0';
 }
 
-int vp_analyze_solver(const uint32_t* suits, const uint32_t* ranks, uint32_t bet, VPSolverAnalysis* out_analysis) {
-    if (!out_analysis) return 0;
+int vp_analyze_solver(VPHandle handle, const uint32_t* suits, const uint32_t* ranks, uint32_t bet, VPSolverAnalysis* out_analysis) {
+    if (!out_analysis || handle == nullptr) return 0;
 
     std::array<Card, 5> card_objs = {
         Card(suits[0], ranks[0]),
@@ -278,7 +269,7 @@ int vp_analyze_solver(const uint32_t* suits, const uint32_t* ranks, uint32_t bet
     uint32_t second_mask = 0;
     double best_ev = 0.0;
     double second_ev = 0.0;
-    if (!AutoHold::solver_top_two(card_ptrs, bet, best_mask, best_ev, second_mask, second_ev)) {
+    if (!AutoHold::solver_top_two(card_ptrs, bet, static_cast<TrainerContext*>(handle)->variant(), best_mask, best_ev, second_mask, second_ev)) {
         return 0;
     }
 

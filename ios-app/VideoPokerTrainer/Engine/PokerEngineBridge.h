@@ -7,6 +7,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithSeed:(uint64_t)seed;
 
 - (BOOL)setEngine:(NSString *)engineName error:(NSError * _Nullable * _Nullable)error;
+- (BOOL)setVariant:(NSString *)variantId error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)loadMlModel:(NSString *)path error:(NSError * _Nullable * _Nullable)error;
 - (nullable NSDictionary *)dealSuggestedWithBet:(NSInteger)bet error:(NSError * _Nullable * _Nullable)error;
 - (nullable NSDictionary *)drawWithBet:(NSInteger)bet holdMask:(NSUInteger)holdMask error:(NSError * _Nullable * _Nullable)error;

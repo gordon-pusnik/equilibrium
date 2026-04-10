@@ -53,6 +53,14 @@ Java_com_example_videopoker_NativeBridge_nativeSetEngine(JNIEnv* env, jobject, j
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
+Java_com_example_videopoker_NativeBridge_nativeSetVariant(JNIEnv* env, jobject, jlong handle, jstring variantId) {
+    const char* c_variant = env->GetStringUTFChars(variantId, nullptr);
+    const int ok = vp_set_variant(reinterpret_cast<VPHandle>(handle), c_variant);
+    env->ReleaseStringUTFChars(variantId, c_variant);
+    return ok == 1 ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_videopoker_NativeBridge_nativeSetMlModel(JNIEnv* env, jobject, jlong handle, jstring path) {
     const char* c_path = env->GetStringUTFChars(path, nullptr);
     const int ok = vp_set_ml_model(reinterpret_cast<VPHandle>(handle), c_path);
@@ -169,6 +177,7 @@ extern "C" JNIEXPORT jdoubleArray JNICALL
 Java_com_example_videopoker_NativeBridge_nativeAnalyzeSolver(
     JNIEnv* env,
     jobject,
+    jlong handle,
     jintArray suits,
     jintArray ranks,
     jint bet
@@ -190,7 +199,7 @@ Java_com_example_videopoker_NativeBridge_nativeAnalyzeSolver(
     }
 
     VPSolverAnalysis analysis = {};
-    if (vp_analyze_solver(c_suits, c_ranks, static_cast<uint32_t>(bet), &analysis) != 1) {
+    if (vp_analyze_solver(reinterpret_cast<VPHandle>(handle), c_suits, c_ranks, static_cast<uint32_t>(bet), &analysis) != 1) {
         return nullptr;
     }
 
