@@ -3,6 +3,7 @@
 #include "card.h"
 #include "checkforwin.h"
 #include "autohold.h"
+#include "game_variant.h"
 #include <iostream>
 
 void Hand::new_hand(Deck *deck) {
@@ -31,55 +32,52 @@ void Hand::to_console() const {
     std::cout << std::endl;
 }
 
-void Hand::auto_hold(uint32_t bet) const {
-    AutoHold::auto_hold(m_cards, bet);
+void Hand::auto_hold(uint32_t bet, GameVariant variant) const {
+    AutoHold::auto_hold(m_cards, bet, variant);
 }
 
-uint32_t Hand::check_for_win(uint32_t bet) const {
+uint32_t Hand::check_for_win(uint32_t bet, GameVariant variant) const {
     uint32_t winnings = 0;
+    const GameVariantInfo& info = game_variant_info(variant);
 
     switch(CheckForWin::check_for_win(m_cards)) {
         case NONE:
             std::cout << "Win nothing" << std::endl;
             break;
         case HIGHPAIR:
-            winnings = bet * 1;
+            winnings = bet * info.high_pair;
             std::cout << "Win high pair = " << winnings << std::endl;
             break;
         case TWOPAIR:
-            winnings = bet * 2;
+            winnings = bet * info.two_pair;
             std::cout << "Win two pair = " << winnings << std::endl;
             break;
         case THREEOFAKIND:
-            winnings = bet * 3;
+            winnings = bet * info.three_of_a_kind;
             std::cout << "Win three of a kind = " << winnings << std::endl;
             break;
         case STRAIGHT:
-            winnings = bet * 4;
+            winnings = bet * info.straight;
             std::cout << "Win straight = " << winnings << std::endl;
             break;
         case FLUSH:
-            winnings = bet * 6;
+            winnings = bet * info.flush;
             std::cout << "Win flush = " << winnings << std::endl;
             break;
         case FULLHOUSE:
-            winnings = bet * 9;
+            winnings = bet * info.full_house;
             std::cout << "Win full house = " << winnings << std::endl;
             break;
         case FOUROFAKIND:
-            winnings = bet * 25;
+            winnings = bet * info.four_of_a_kind;
             std::cout << "Win four of a kind = " << winnings << std::endl;
             break;
         case STRAIGHTFLUSH:
-            winnings = bet * 50;
+            winnings = bet * info.straight_flush;
             std::cout << "Win straight flush = " << winnings << std::endl;
             break;
         case ROYALFLUSH:
-            if (bet == 5) {
-                winnings = bet * 800;
-            } else {
-                winnings = bet * 250;
-            }
+            winnings = (bet == 5) ? info.royal_flush_max_bet : (bet * info.royal_flush);
             std::cout << "Win royal flush = " << winnings << std::endl;
             break;
     }

@@ -9,8 +9,16 @@ struct UiCard: Identifiable {
     var winning: Bool = false
 }
 
+struct GameVariantUi: Identifiable {
+    let id: String
+    let name: String
+    let rtpText: String
+    let isPremium: Bool
+}
+
 struct ContentView: View {
     @State private var engine: String = "solver"
+    @State private var selectedVariantId: String = "jacks_or_better_9_6"
     @State private var bet: Int = 5
     @State private var initialCards: [UiCard] = []
     @State private var finalCards: [UiCard] = []
@@ -27,23 +35,36 @@ struct ContentView: View {
     @State private var autoHoldEnabled: Bool = true
 
     private let bridge = PokerEngineBridge(seed: UInt64(Date().timeIntervalSince1970 * 1000))
-    private var bundledMlModelPath: String {
-        return Bundle.main.path(forResource: "model", ofType: "json") ?? ""
+    private let gameVariants: [GameVariantUi] = [
+        GameVariantUi(id: "jacks_or_better_9_6", name: "Jacks or Better 9/6", rtpText: "99.54%", isPremium: false),
+        GameVariantUi(id: "jacks_or_better_8_5", name: "Jacks or Better 8/5", rtpText: "97.30%", isPremium: false)
+    ]
+    private var bundledMlModelPaths: [String: String] {
+        [
+            "jacks_or_better_9_6": Bundle.main.path(forResource: "modeljob96", ofType: "json") ?? "",
+            "jacks_or_better_8_5": Bundle.main.path(forResource: "modeljob85", ofType: "json") ?? ""
+        ]
+    }
+    private var selectedVariant: GameVariantUi {
+        gameVariants.first(where: { $0.id == selectedVariantId }) ?? gameVariants[0]
     }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                //Text("Video Poker Trainer")
-                //    .font(.largeTitle.weight(.bold))
-                //    .multilineTextAlignment(.center)
+            VStack(spacing: 8) {
+                Text("Video Poker Trainer")
+                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.center)
 
                 VStack(spacing: 8) {
-                    Text("Jacks or Better 9/6")
-                        .font(.title3.weight(.semibold))
-                        .multilineTextAlignment(.center)
+                    Picker("Game", selection: $selectedVariantId) {
+                        ForEach(gameVariants) { variant in
+                            Text(variant.name).tag(variant.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
 
-                    Text("Expected RTP (optimal play): 99.54%")
+                    Text("Expected RTP (optimal play): \(selectedVariant.rtpText)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -52,7 +73,7 @@ struct ContentView: View {
                         Text("Paytable (\(bet) coin\(bet == 1 ? "" : "s"))")
                             .font(.subheadline.weight(.semibold))
 
-                        ForEach(paytableEntries(for: bet), id: \.name) { entry in
+                        ForEach(paytableEntries(for: selectedVariantId, bet: bet), id: \.name) { entry in
                             HStack {
                                 Text(entry.name)
                                     .foregroundColor(.secondary)
@@ -72,10 +93,12 @@ struct ContentView: View {
                 Picker("Engine", selection: $engine) {
                     Text("solver").tag("solver")
                     Text("rule").tag("rule")
-                    Text("ml").tag("ml")
+                    Text("ai").tag("ml")
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 400)
+                
+                Spacer()
 
                 HStack(spacing: 20) {
                     HStack {
@@ -94,7 +117,9 @@ struct ContentView: View {
                             .font(.body)
                     }
                 }
-
+                
+                Spacer()
+ 
                 HStack(spacing: 16) {
                     Button("Deal") {
                         dealSuggested()
@@ -114,7 +139,9 @@ struct ContentView: View {
                         .multilineTextAlignment(.center)
                 }
 
-                VStack(spacing: 20) {
+                Spacer()
+                
+                VStack(spacing: 14) {
                     VStack(spacing: 8) {
                         Text("Initial (tap to toggle holds)")
                             .font(.subheadline.weight(.semibold))
@@ -130,11 +157,12 @@ struct ContentView: View {
                     }
 
                     if !explanationLabel.isEmpty && !initialCards.isEmpty {
-                        VStack(spacing: 4) {
+                        VStack(spacing: 10) {
+                            /*
                             Text("Why: \(explanationLabel)")
                                 .font(.subheadline.weight(.medium))
                                 .multilineTextAlignment(.center)
-
+                            */
                             Button(showExplanationDetails ? "Hide Details" : "Details") {
                                 showExplanationDetails.toggle()
                             }
@@ -179,9 +207,9 @@ struct ContentView: View {
                         CardRow(cards: finalCards, interactive: false, suggestedMask: nil) { _ in }
                     }
                 }
-
+                
                 Text("Payout: \(payout)")
-                    .font(.title3.weight(.bold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundColor(payout > 0 ? .green : .secondary)
 
                 Spacer()
@@ -203,21 +231,41 @@ struct ContentView: View {
         .onChange(of: bet) { _ in
             refreshSuggestedHolds()
         }
+        .onChange(of: selectedVariantId) { _ in
+            resetHandState()
+        }
     }
 
     private func prepareEngine() -> NSError? {
         do {
             try bridge.setEngine(engine)
+            try bridge.setVariant(selectedVariantId)
             if engine == "ml" {
-                if bundledMlModelPath.isEmpty {
+                let modelPath = bundledMlModelPaths[selectedVariantId] ?? ""
+                if modelPath.isEmpty {
                     return NSError(domain: "PokerEngine", code: 3, userInfo: [NSLocalizedDescriptionKey: "Bundled ML model was not found"])
                 }
-                try bridge.loadMlModel(bundledMlModelPath)
+                try bridge.loadMlModel(modelPath)
             }
             return nil
         } catch {
             return error as NSError
         }
+    }
+
+    private func resetHandState() {
+        initialCards = []
+        finalCards = []
+        payout = 0
+        errorText = ""
+        suggestedMask = 0
+        explanationLabel = ""
+        explanationSummary = ""
+        showExplanationDetails = false
+        solverNextBest = ""
+        solverBestEV = nil
+        solverNextEV = nil
+        canDraw = false
     }
 
     private func dealSuggested() {
@@ -427,13 +475,15 @@ private struct PaytableEntry: Identifiable {
     var id: String { name }
 }
 
-private func paytableEntries(for bet: Int) -> [PaytableEntry] {
-    [
+private func paytableEntries(for variantId: String, bet: Int) -> [PaytableEntry] {
+    let fullHouse = variantId == "jacks_or_better_8_5" ? 8 : 9
+    let flush = variantId == "jacks_or_better_8_5" ? 5 : 6
+    return [
         PaytableEntry(name: "Royal Flush", payout: bet == 5 ? 4000 : bet * 250),
         PaytableEntry(name: "Straight Flush", payout: bet * 50),
         PaytableEntry(name: "Four of a Kind", payout: bet * 25),
-        PaytableEntry(name: "Full House", payout: bet * 9),
-        PaytableEntry(name: "Flush", payout: bet * 6),
+        PaytableEntry(name: "Full House", payout: bet * fullHouse),
+        PaytableEntry(name: "Flush", payout: bet * flush),
         PaytableEntry(name: "Straight", payout: bet * 4),
         PaytableEntry(name: "Three of a Kind", payout: bet * 3),
         PaytableEntry(name: "Two Pair", payout: bet * 2),

@@ -15,27 +15,13 @@
 #include "card.h"
 #include "checkforwin.h"
 #include "deck.h"
+#include "game_variant.h"
 #include "hand.h"
-
-static uint32_t payout_from_result(uint32_t result, uint32_t bet) {
-    switch (result) {
-        case NONE: return 0;
-        case HIGHPAIR: return bet * 1;
-        case TWOPAIR: return bet * 2;
-        case THREEOFAKIND: return bet * 3;
-        case STRAIGHT: return bet * 4;
-        case FLUSH: return bet * 6;
-        case FULLHOUSE: return bet * 9;
-        case FOUROFAKIND: return bet * 25;
-        case STRAIGHTFLUSH: return bet * 50;
-        case ROYALFLUSH: return (bet == 5) ? (bet * 800) : (bet * 250);
-        default: return 0;
-    }
-}
 
 int main(int argc, char *argv[]) {
     std::string engine_name = "solver";
     std::string ml_model_path;
+    GameVariant variant = GameVariant::JACKS_OR_BETTER_9_6;
     bool print_strategy = false;
     std::string dump_training_path;
     std::vector<std::string> positional;
@@ -48,6 +34,15 @@ int main(int argc, char *argv[]) {
                 return 1;
             }
             engine_name = argv[++i];
+        } else if (arg == "--variant") {
+            if (i + 1 >= argc) {
+                std::cout << "Error - --variant requires value: jacks_or_better_9_6|jacks_or_better_8_5" << std::endl;
+                return 1;
+            }
+            if (!parse_game_variant_id(argv[++i], variant)) {
+                std::cout << "Error - invalid variant: " << argv[i] << std::endl;
+                return 1;
+            }
         } else if (arg == "--ml-model") {
             if (i + 1 >= argc) {
                 std::cout << "Error - --ml-model requires model path" << std::endl;
@@ -68,7 +63,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (positional.size() != 3 && positional.size() != 0) {
-        std::cout << "Error - usage: main [--engine solver|rule|ml] [--ml-model model.json] [--print-strategy] [--dump-training path.jsonl] [coins bet iterations]" << std::endl;
+        std::cout << "Error - usage: main [--engine solver|rule|ml] [--variant jacks_or_better_9_6|jacks_or_better_8_5] [--ml-model model.json] [--print-strategy] [--dump-training path.jsonl] [coins bet iterations]" << std::endl;
         return 1;
     }
 
@@ -103,16 +98,18 @@ int main(int argc, char *argv[]) {
     }
 
     if (positional.size() != 3) {
-        std::cout << "Error - usage: main [--engine solver|rule|ml] [--ml-model model.json] [--print-strategy] [--dump-training path.jsonl] [coins bet iterations]" << std::endl;
+        std::cout << "Error - usage: main [--engine solver|rule|ml] [--variant jacks_or_better_9_6|jacks_or_better_8_5] [--ml-model model.json] [--print-strategy] [--dump-training path.jsonl] [coins bet iterations]" << std::endl;
         return 1;
     }
 
+    const GameVariantInfo& variant_info = game_variant_info(variant);
     uint32_t coins = atoi(positional[0].c_str());
     uint32_t bet = atoi(positional[1].c_str());
     uint32_t iterations = atoi(positional[2].c_str());
     std::cout << "Running " << coins << " coins with a bet of " << bet
               << " for " << iterations << " iterations"
-              << " using engine " << engine_name << std::endl;
+              << " using engine " << engine_name
+              << " on variant " << variant_info.id << std::endl;
 
     const bool dump_training = !dump_training_path.empty();
     if (dump_training) {
@@ -149,7 +146,7 @@ int main(int argc, char *argv[]) {
 
                     deck->shuffle();
                     deck->new_hand();
-                    deck->hand()->auto_hold(bet);
+                    deck->hand()->auto_hold(bet, variant);
 
                     auto initial_cards_ptr = deck->hand()->cards();
                     uint32_t hold_mask = 0;
@@ -162,14 +159,14 @@ int main(int argc, char *argv[]) {
                     deck->draw_cards();
                     auto final_cards_ptr = deck->hand()->cards();
                     const uint32_t win_type = CheckForWin::check_for_win(final_cards_ptr);
-                    const uint32_t winnings = payout_from_result(win_type, bet);
+                    const uint32_t winnings = payout_for_result(win_type, bet, variant);
 
                     {
                         std::lock_guard<std::mutex> lock(coins_mutex);
                         coins += winnings;
                     }
 
-                    ss << "{\"engine\":\"" << engine_name << "\",\"bet\":" << bet
+                    ss << "{\"engine\":\"" << engine_name << "\",\"variant\":\"" << variant_info.id << "\",\"bet\":" << bet
                        << ",\"initial\":[";
                     for (uint32_t c = 0; c < 5; c++) {
                         if (c > 0) ss << ",";
@@ -216,11 +213,11 @@ int main(int argc, char *argv[]) {
         coins -= bet;
         deck->shuffle();
         deck->new_hand();
-        deck->hand()->auto_hold(bet);
+        deck->hand()->auto_hold(bet, variant);
         deck->hand()->to_console();
         
         deck->draw_cards();
-        uint32_t winnings = deck->hand()->check_for_win(bet);
+        uint32_t winnings = deck->hand()->check_for_win(bet, variant);
         deck->hand()->to_console();
 
         coins += winnings;

@@ -28,6 +28,7 @@ void vp_destroy(VPHandle handle);
 
 int vp_set_engine(VPHandle handle, const char* engine_name);
 int vp_set_ml_model(VPHandle handle, const char* model_path);
+int vp_set_variant(VPHandle handle, const char* variant_id);
 
 int vp_deal_suggest(VPHandle handle, uint32_t bet, VPHandState* out_state);
 int vp_draw_with_mask(VPHandle handle, uint32_t bet, uint32_t hold_mask, VPHandState* out_state);
@@ -56,7 +57,7 @@ typedef struct VPSolverAnalysis {
     double second_ev;
 } VPSolverAnalysis;
 
-int vp_analyze_solver(const uint32_t* suits, const uint32_t* ranks, uint32_t bet, VPSolverAnalysis* out_analysis);
+int vp_analyze_solver(VPHandle handle, const uint32_t* suits, const uint32_t* ranks, uint32_t bet, VPSolverAnalysis* out_analysis);
 
 #ifdef __cplusplus
 }
