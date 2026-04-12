@@ -6,8 +6,10 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,12 +19,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -48,6 +55,11 @@ import androidx.compose.ui.unit.dp
 
 data class UiCard(val suit: Int, val rank: Int, val held: Boolean, val winning: Boolean = false)
 data class GameVariantUi(val id: String, val name: String, val rtpText: String, val isPremium: Boolean = false)
+
+private enum class AppSheet {
+    HELP,
+    SETTINGS
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -75,6 +87,19 @@ private fun AppScreen() {
     var solverNextEv by remember { mutableStateOf<Double?>(null) }
     var canDraw by remember { mutableStateOf(false) }
     var autoHoldEnabled by remember { mutableStateOf(true) }
+    var autoShowExplanation by remember { mutableStateOf(false) }
+    var showPaytable by remember { mutableStateOf(false) }
+    var activeSheet by remember { mutableStateOf<AppSheet?>(null) }
+    var settingsMessage by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val appVersionText = remember(context) {
+        try {
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            packageInfo.versionName ?: "1.0"
+        } catch (_: Exception) {
+            "1.0"
+        }
+    }
 
     val initialCards = remember { mutableStateListOf<UiCard>() }
     val finalCards = remember { mutableStateListOf<UiCard>() }
@@ -130,292 +155,500 @@ private fun AppScreen() {
     }
 
     MaterialTheme {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.Top,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                "Video Poker Trainer",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
+        Box(modifier = Modifier.fillMaxSize()) {
             Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.Top,
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Box {
-                    OutlinedButton(onClick = { showVariantMenu = true }) {
-                        Text(selectedVariant.name)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { activeSheet = AppSheet.HELP }) {
+                        Image(
+                            painter = painterResource(id = R.drawable.help),
+                            contentDescription = "Help",
+                            modifier = Modifier.height(24.dp),
+                            contentScale = ContentScale.Fit
+                        )
                     }
-                    DropdownMenu(
-                        expanded = showVariantMenu,
-                        onDismissRequest = { showVariantMenu = false }
-                    ) {
-                        gameVariants.forEach { variant ->
-                            DropdownMenuItem(
-                                text = { Text(variant.name) },
-                                onClick = {
-                                    selectedVariantId = variant.id
-                                    showVariantMenu = false
-                                    resetHandState(
-                                        initialCards = initialCards,
-                                        finalCards = finalCards,
-                                        setPayout = { payout = it },
-                                        setError = { error = it },
-                                        setSuggestedMask = { suggestedMask = it },
-                                        setExplanationCategory = { explanationCategory = it },
-                                        setExplanationLabel = { explanationLabel = it },
-                                        setExplanationSummary = { explanationSummary = it },
-                                        setExplanationTip = { explanationTip = it },
-                                        setShowExplanationDetails = { showExplanationDetails = it },
-                                        setMistakeSeverity = { mistakeSeverity = it },
-                                        setMistakeEvDelta = { mistakeEvDelta = it },
-                                        setSolverNextBest = { solverNextBest = it },
-                                        setSolverBestEv = { solverBestEv = it },
-                                        setSolverNextEv = { solverNextEv = it },
-                                        setCanDraw = { canDraw = it }
-                                    )
-                                }
-                            )
-                        }
+                    IconButton(onClick = { activeSheet = AppSheet.SETTINGS }) {
+                        Image(
+                            painter = painterResource(id = R.drawable.settings),
+                            contentDescription = "Settings",
+                            modifier = Modifier.height(24.dp),
+                            contentScale = ContentScale.Fit
+                        )
                     }
                 }
-                Text(
-                    "Expected RTP (optimal play): ${selectedVariant.rtpText}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.DarkGray,
-                    textAlign = TextAlign.Center
-                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                        .background(Color(0xFFF3F3F3), RoundedCornerShape(12.dp))
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    Box {
+                        OutlinedButton(onClick = { showVariantMenu = true }) {
+                            Text(selectedVariant.name)
+                        }
+                        DropdownMenu(
+                            expanded = showVariantMenu,
+                            onDismissRequest = { showVariantMenu = false }
+                        ) {
+                            gameVariants.forEach { variant ->
+                                DropdownMenuItem(
+                                    text = { Text(variant.name) },
+                                    onClick = {
+                                        selectedVariantId = variant.id
+                                        showVariantMenu = false
+                                        resetHandState(
+                                            initialCards = initialCards,
+                                            finalCards = finalCards,
+                                            setPayout = { payout = it },
+                                            setError = { error = it },
+                                            setSuggestedMask = { suggestedMask = it },
+                                            setExplanationCategory = { explanationCategory = it },
+                                            setExplanationLabel = { explanationLabel = it },
+                                            setExplanationSummary = { explanationSummary = it },
+                                            setExplanationTip = { explanationTip = it },
+                                            setShowExplanationDetails = { showExplanationDetails = it },
+                                            setMistakeSeverity = { mistakeSeverity = it },
+                                            setMistakeEvDelta = { mistakeEvDelta = it },
+                                            setSolverNextBest = { solverNextBest = it },
+                                            setSolverBestEv = { solverBestEv = it },
+                                            setSolverNextEv = { solverNextEv = it },
+                                            setCanDraw = { canDraw = it }
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
                     Text(
-                        "Paytable ($bet coin${if (bet == 1) "" else "s"})",
+                        "Expected RTP (optimal play): ${selectedVariant.rtpText}",
                         style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.fillMaxWidth(),
+                        color = Color.DarkGray,
                         textAlign = TextAlign.Center
                     )
-                    paytableEntries(selectedVariantId, bet).forEach { entry ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp)
+                            .background(Color(0xFFF3F3F3), RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        TextButton(
+                            onClick = { showPaytable = !showPaytable },
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
                         ) {
+                            Text(if (showPaytable) "Hide Paytable" else "Show Paytable")
+                        }
+                        if (showPaytable) {
                             Text(
-                                entry.name,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.DarkGray
+                                "Paytable ($bet coin${if (bet == 1) "" else "s"})",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Center
                             )
-                            Text(
-                                entry.payout.toString(),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            paytableEntries(selectedVariantId, bet).forEach { entry ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        entry.name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.DarkGray
+                                    )
+                                    Text(
+                                        entry.payout.toString(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { if (bet > 1) bet-- }) { Text("-") }
-                Text("Bet: $bet", fontWeight = FontWeight.Bold)
-                Button(onClick = { if (bet < 5) bet++ }) { Text("+") }
-                
-                Spacer(modifier = Modifier.width(16.dp))
-                
-                Text("Best Hold", style = MaterialTheme.typography.bodyMedium)
-                Switch(checked = autoHoldEnabled, onCheckedChange = { autoHoldEnabled = it })
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = {
-                    error = ""
-                    if (!prepareEngine(handle, selectedVariantId)) {
-                        error = "Failed to set engine"
-                        return@Button
-                    }
-                    val data = NativeBridge.nativeDealSuggested(handle, bet)
-                    if (data == null || data.size < 42) {
-                        error = "Failed to deal"
-                        return@Button
-                    }
-                    populateFromData(
-                        data = data,
-                        initialCards = initialCards,
-                        finalCards = finalCards,
-                        useHeld = autoHoldEnabled,
-                        includeFinalCards = false
-                    )
-                    payout = 0
-                    suggestedMask = data[20]
-                    val explanation = explainHold(initialCards, suggestedMask)
-                    explanationCategory = explanation.category
-                    explanationLabel = explanation.headline
-                    explanationSummary = explanation.summary
-                    explanationTip = explanation.patternTip
-                    val mistakeAnalysis = analyzePlayerHold(handle, initialCards, bet)
-                    mistakeSeverity = mistakeAnalysis?.severity.orEmpty()
-                    mistakeEvDelta = mistakeAnalysis?.evDelta
-                    val solverAnalysis = analyzeSolver(handle, initialCards, bet)
-                    solverBestEv = solverAnalysis?.bestEv
-                    solverNextEv = solverAnalysis?.secondEv
-                    solverNextBest = solverAnalysis?.let { formatHeldCards(initialCards, it.secondMask) }.orEmpty()
-                    showExplanationDetails = false
-                    canDraw = true
-                }) { Text("Deal") }
-
-                Button(onClick = {
-                    error = ""
-                    val holdMask = initialCards.foldIndexed(0) { index, acc, card ->
-                        if (card.held) acc or (1 shl index) else acc
-                    }
-                    val data = NativeBridge.nativeDrawWithMask(handle, bet, holdMask)
-                    if (data == null || data.size < 42) {
-                        error = "Failed to draw. Deal first."
-                        return@Button
-                    }
-                    populateFromData(
-                        data = data,
-                        initialCards = initialCards,
-                        finalCards = finalCards,
-                        useHeld = true,
-                        includeFinalCards = true
-                    )
-                    payout = data[21]
-                    explanationCategory = ""
-                    explanationLabel = ""
-                    explanationSummary = ""
-                    explanationTip = ""
-                    mistakeSeverity = ""
-                    mistakeEvDelta = null
-                    solverBestEv = null
-                    solverNextEv = null
-                    solverNextBest = ""
-                    showExplanationDetails = false
-                    canDraw = false
-                }, enabled = canDraw) { Text("Draw") }
-            }
-
-            if (error.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(error, color = Color.Red, textAlign = TextAlign.Center)
-            }
 
-            Spacer(modifier = Modifier.height(14.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(onClick = { if (bet > 1) bet-- }) { Text("-") }
+                    Text("Bet: $bet", fontWeight = FontWeight.Bold)
+                    Button(onClick = { if (bet < 5) bet++ }) { Text("+") }
 
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Initial (tap to toggle holds)", fontWeight = FontWeight.SemiBold)
-                CardRow(
-                    initialCards, 
-                    interactive = canDraw, 
-                    suggestedMask = if (autoHoldEnabled) suggestedMask else null
-                ) { idx ->
-                    if (canDraw) {
-                        val c = initialCards[idx]
-                        initialCards[idx] = c.copy(held = !c.held)
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    Text("Show Best Hold", style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = autoHoldEnabled, onCheckedChange = { autoHoldEnabled = it })
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(onClick = {
+                        error = ""
+                        if (!prepareEngine(handle, selectedVariantId)) {
+                            error = "Failed to set engine"
+                            return@Button
+                        }
+                        val data = NativeBridge.nativeDealSuggested(handle, bet)
+                        if (data == null || data.size < 42) {
+                            error = "Failed to deal"
+                            return@Button
+                        }
+                        populateFromData(
+                            data = data,
+                            initialCards = initialCards,
+                            finalCards = finalCards,
+                            useHeld = autoHoldEnabled,
+                            includeFinalCards = false
+                        )
+                        payout = 0
+                        suggestedMask = data[20]
+                        val explanation = explainHold(initialCards, suggestedMask)
+                        explanationCategory = explanation.category
+                        explanationLabel = explanation.headline
+                        explanationSummary = explanation.summary
+                        explanationTip = explanation.patternTip
                         val mistakeAnalysis = analyzePlayerHold(handle, initialCards, bet)
                         mistakeSeverity = mistakeAnalysis?.severity.orEmpty()
                         mistakeEvDelta = mistakeAnalysis?.evDelta
-                    }
-                }
-            }
+                        val solverAnalysis = analyzeSolver(handle, initialCards, bet)
+                        solverBestEv = solverAnalysis?.bestEv
+                        solverNextEv = solverAnalysis?.secondEv
+                        solverNextBest = solverAnalysis?.let { formatHeldCards(initialCards, it.secondMask) }.orEmpty()
+                        showExplanationDetails = autoShowExplanation
+                        canDraw = true
+                    }) { Text("Deal") }
 
-            if (explanationLabel.isNotEmpty() && initialCards.isNotEmpty()) {
+                    Button(
+                        onClick = {
+                            error = ""
+                            val holdMask = initialCards.foldIndexed(0) { index, acc, card ->
+                                if (card.held) acc or (1 shl index) else acc
+                            }
+                            val data = NativeBridge.nativeDrawWithMask(handle, bet, holdMask)
+                            if (data == null || data.size < 42) {
+                                error = "Failed to draw. Deal first."
+                                return@Button
+                            }
+                            populateFromData(
+                                data = data,
+                                initialCards = initialCards,
+                                finalCards = finalCards,
+                                useHeld = true,
+                                includeFinalCards = true
+                            )
+                            payout = data[21]
+                            explanationCategory = ""
+                            explanationLabel = ""
+                            explanationSummary = ""
+                            explanationTip = ""
+                            mistakeSeverity = ""
+                            mistakeEvDelta = null
+                            solverBestEv = null
+                            solverNextEv = null
+                            solverNextBest = ""
+                            showExplanationDetails = false
+                            canDraw = false
+                        },
+                        enabled = canDraw
+                    ) { Text("Draw") }
+                }
+
+                if (error.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(error, color = Color.Red, textAlign = TextAlign.Center)
+                }
+
                 Spacer(modifier = Modifier.height(6.dp))
-                TextButton(onClick = { showExplanationDetails = !showExplanationDetails }) {
-                    Text(if (showExplanationDetails) "Hide details" else "Details")
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Dealt Hand (tap to hold or discard)", fontWeight = FontWeight.SemiBold)
+                    CardRow(
+                        cards = initialCards,
+                        interactive = canDraw,
+                        suggestedMask = if (autoHoldEnabled) suggestedMask else null
+                    ) { idx ->
+                        if (canDraw) {
+                            val card = initialCards[idx]
+                            initialCards[idx] = card.copy(held = !card.held)
+                            val mistakeAnalysis = analyzePlayerHold(handle, initialCards, bet)
+                            mistakeSeverity = mistakeAnalysis?.severity.orEmpty()
+                            mistakeEvDelta = mistakeAnalysis?.evDelta
+                        }
+                    }
                 }
-                if (showExplanationDetails) {
-                    Text(
-                        "Best Hold: $explanationLabel",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        textAlign = TextAlign.Center
-                    )
+
+                if (explanationLabel.isNotEmpty() && initialCards.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        explanationSummary,
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
-                        color = Color.DarkGray
-                    )
-                    if (explanationTip.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            "Pattern tip: $explanationTip",
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            color = Color.DarkGray
-                        )
+                    TextButton(onClick = { showExplanationDetails = !showExplanationDetails }) {
+                        Text(if (showExplanationDetails) "Hide Strategy Explanation" else "Strategy Explanation")
                     }
-                    if (mistakeSeverity.isNotEmpty() && mistakeEvDelta != null) {
-                        Spacer(modifier = Modifier.height(4.dp))
+                    if (showExplanationDetails) {
                         Text(
-                            "Current choice: ${severityDisplayText(mistakeSeverity)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            color = severityColor(mistakeSeverity)
+                            "Best Hold: $explanationLabel",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "EV loss vs solver: ${"%.2f".format(mistakeEvDelta ?: 0.0)}",
+                            explanationSummary,
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center,
                             color = Color.DarkGray
                         )
-                    }
-                    if (solverBestEv != null && solverNextEv != null && solverNextBest.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            "Best EV: ${"%.2f".format(solverBestEv)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            color = Color.DarkGray
-                        )
-                        Text(
-                            "Next best: Hold $solverNextBest - EV ${"%.2f".format(solverNextEv)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            color = Color.DarkGray
-                        )
-                        Text(
-                            "EV edge: +${"%.2f".format((solverBestEv ?: 0.0) - (solverNextEv ?: 0.0))}",
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            color = Color.DarkGray
-                        )
+                        if (explanationTip.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Pattern tip: $explanationTip",
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                color = Color.DarkGray
+                            )
+                        }
+                        if (mistakeSeverity.isNotEmpty() && mistakeEvDelta != null) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Current choice: ${severityDisplayText(mistakeSeverity)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                color = severityColor(mistakeSeverity)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "EV loss vs solver: ${"%.2f".format(mistakeEvDelta ?: 0.0)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                color = Color.DarkGray
+                            )
+                        }
+                        if (solverBestEv != null && solverNextEv != null && solverNextBest.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Best EV: ${"%.2f".format(solverBestEv)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                color = Color.DarkGray
+                            )
+                            Text(
+                                "Next best: Hold $solverNextBest - EV ${"%.2f".format(solverNextEv)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                color = Color.DarkGray
+                            )
+                            Text(
+                                "EV edge: +${"%.2f".format((solverBestEv ?: 0.0) - (solverNextEv ?: 0.0))}",
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                color = Color.DarkGray
+                            )
+                        }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Final Hand", fontWeight = FontWeight.SemiBold)
+                    CardRow(cards = finalCards, interactive = false, suggestedMask = null) {}
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    "Payout: $payout",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = if (payout > 0) Color(0xFF2E7D32) else Color.Gray
+                )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Final", fontWeight = FontWeight.SemiBold)
-                CardRow(finalCards, interactive = false, suggestedMask = null) {}
+            when (activeSheet) {
+                AppSheet.HELP -> TrainerDialog(
+                    title = "Help / How to Play",
+                    onDismiss = { activeSheet = null }
+                ) {
+                    HelpScreenContent()
+                }
+                AppSheet.SETTINGS -> TrainerDialog(
+                    title = "Settings / About",
+                    onDismiss = { activeSheet = null }
+                ) {
+                    SettingsScreenContent(
+                        autoShowExplanation = autoShowExplanation,
+                        onAutoShowExplanationChange = { autoShowExplanation = it },
+                        appVersion = appVersionText,
+                        onPlaceholderAction = { settingsMessage = it }
+                    )
+                }
+                null -> Unit
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-            Text(
-                "Payout: $payout",
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Bold,
-                color = if (payout > 0) Color(0xFF2E7D32) else Color.Gray
-            )
+            if (settingsMessage.isNotEmpty()) {
+                AlertDialog(
+                    onDismissRequest = { settingsMessage = "" },
+                    confirmButton = {
+                        TextButton(onClick = { settingsMessage = "" }) {
+                            Text("OK")
+                        }
+                    },
+                    title = { Text("Not Available Yet") },
+                    text = { Text(settingsMessage) }
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun TrainerDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done")
+            }
+        },
+        title = { Text(title) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                content()
+            }
+        }
+    )
+}
+
+@Composable
+private fun HelpScreenContent() {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        HelpSection(
+            title = "How the trainer works",
+            body = "Deal a hand, choose which cards to hold, then draw. The trainer compares your choice to the solver-backed best play."
+        )
+        HelpSection(
+            title = "Holding and discarding",
+            body = "Turn off Show Best Hold if you want to choose cards yourself. Tap dealt cards to hold or release them before drawing."
+        )
+        HelpSection(
+            title = "Show Best Hold",
+            body = "When this is on, the trainer marks the solver-recommended hold for the current hand."
+        )
+        HelpSection(
+            title = "Mistake levels",
+            body = "Perfect means you matched the best play. Very close means the EV loss was tiny. Small, moderate, and major mistakes mean you gave up more value versus the solver."
+        )
+        HelpSection(
+            title = "What EV means",
+            body = "EV stands for expected value. It is the average return of a play over many repetitions, not a guarantee for one hand."
+        )
+        HelpSection(
+            title = "Free variants",
+            body = "9/6 and 8/5 describe the full house and flush payouts. 9/6 returns more under optimal play than 8/5."
+        )
+    }
+}
+
+@Composable
+private fun SettingsScreenContent(
+    autoShowExplanation: Boolean,
+    onAutoShowExplanationChange: (Boolean) -> Unit,
+    appVersion: String,
+    onPlaceholderAction: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SettingsToggleRow(
+            label = "Auto-show strategy explanation",
+            checked = autoShowExplanation,
+            onCheckedChange = onAutoShowExplanationChange
+        )
+        HelpSection(
+            title = "Sound and haptics",
+            body = "Sound and haptic controls are not supported in the current MVP."
+        )
+        SettingsActionRow("Restore Purchases") {
+            onPlaceholderAction("Purchase restore is reserved for future premium content and is not active in this MVP.")
+        }
+        SettingsActionRow("Privacy Policy") {
+            onPlaceholderAction("A dedicated privacy policy link has not been added to the app yet.")
+        }
+        SettingsActionRow("Terms") {
+            onPlaceholderAction("A dedicated terms link has not been added to the app yet.")
+        }
+        InfoRow("App Version", appVersion)
+    }
+}
+
+@Composable
+private fun HelpSection(title: String, body: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, fontWeight = FontWeight.SemiBold)
+        Text(body, style = MaterialTheme.typography.bodySmall, color = Color.DarkGray)
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun SettingsActionRow(label: String, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color(0xFFF3F3F3),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+            Text(label, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start)
+        }
+    }
+}
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label)
+        Text(value, color = Color.DarkGray)
     }
 }
 
@@ -601,7 +834,6 @@ private fun populateFromData(
     initialCards.clear()
     finalCards.clear()
 
-    // each card 4 ints: suit, rank, held, winning
     for (i in 0 until 5) {
         val base = i * 4
         val isHeld = if (useHeld) data[base + 2] == 1 else false
@@ -609,7 +841,6 @@ private fun populateFromData(
     }
 
     if (includeFinalCards) {
-        // starts after initial (20 ints) + hold_mask (1) + payout (1) = 22
         for (i in 0 until 5) {
             val base = 22 + i * 4
             finalCards += UiCard(data[base], data[base + 1], data[base + 2] == 1, data[base + 3] == 1)
@@ -626,7 +857,7 @@ private fun CardRow(cards: List<UiCard>, interactive: Boolean, suggestedMask: In
         cards.forEachIndexed { idx, card ->
             val suggested = suggestedMask?.let { (it and (1 shl idx)) != 0 }
             val borderColor = when {
-                card.winning -> Color(0xFFFDD835) // Yellow for winning cards
+                card.winning -> Color(0xFFFDD835)
                 !interactive || suggested == null -> if (card.held) Color(0xFFD17C00) else Color.LightGray
                 card.held == suggested && card.held -> Color(0xFF2E7D32)
                 card.held == suggested && !card.held -> Color.LightGray
