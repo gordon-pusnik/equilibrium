@@ -12,9 +12,9 @@ WORKDIR /app
 
 # Copy the poker-core sources
 COPY poker-core/c++ /app/poker-core/c++
-COPY machine-learning/modelv1.json /app/machine-learning/modelv1.json
-COPY machine-learning/modelv2.json /app/machine-learning/modelv2.json
-COPY machine-learning/modelv2.json /app/machine-learning/modelv3.json
+
+COPY ml/modeljob85.json /app/ml/modeljob85.json
+COPY ml/modeljob96.json /app/ml/modeljob96.json
 
 # Build the shared library
 RUN g++ -std=c++17 -O3 -fPIC -shared \
