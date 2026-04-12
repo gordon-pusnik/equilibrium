@@ -79,7 +79,7 @@ Responsibilities:
 - trainer UI
 - game flow and state presentation
 - paytable / RTP views
-- engine compare UI
+- solver-backed trainer flow
 - explanation rendering
 - bridge to native core through JNI
 
@@ -93,7 +93,7 @@ SwiftUI + Objective-C++ client.
 Responsibilities:
 - trainer UI
 - state presentation
-- engine compare UI
+- solver-backed trainer flow
 - explanation rendering
 - native bridge to shared C++ core through Objective-C++
 
@@ -133,11 +133,11 @@ ML should not be treated as authoritative unless explicitly promoted and validat
 A typical trainer hand flow looks like this:
 
 1. User is dealt a 5-card hand
-2. App selects variant and engine
+2. App selects variant
 3. App sends request into native core or backend
-4. Core computes best hold / evaluation result
+4. Core computes solver-backed best hold / evaluation result
 5. UI renders recommendation and explanation data
-6. User can compare engines or submit their own hold choice
+6. User can submit their own hold choice
 7. System computes EV difference and feedback
 
 ---
@@ -205,29 +205,38 @@ It is better to compute these explicitly than to make downstream layers infer ev
 
 ## Coaching architecture
 
-A future premium coaching feature should use this flow:
+The premium coaching backend foundation now exists in the API layer and uses this deterministic flow:
 
 1. Mobile app or API sends:
    - variant
    - hand
    - player hold
-   - skill level
+   - bet
+   - optional aggregation input for summaries/drills
 2. Backend/core computes:
    - solver best hold
    - best EV
    - player EV
-   - mistake cost
-   - ranked alternatives
+    - mistake cost
+    - ranked alternatives
+   - hold labels
+   - leak categories
    - structured hand metadata
 3. Coaching layer returns:
    - headline
    - summary
-   - why-it-wins bullets
-   - mistake severity
    - pattern tip
+   - candidate comparisons
+   - mistake severity
+   - session summary or drill recommendation data when applicable
+
+Current FastAPI endpoints:
+- `POST /v1/coach/compare`
+- `POST /v1/coach/session-summary`
+- `POST /v1/coach/drill-recommendation`
 
 ### Preferred design
-Use solver-backed structured facts first, then template or AI polish second.
+Use solver-backed structured facts first, then deterministic templates. Optional AI polish can sit on top later without changing the underlying contracts.
 
 Preferred sequence:
 - solver -> metadata -> explanation scaffold -> optional LLM polish
@@ -307,16 +316,20 @@ Strategy endpoint accepts:
 ML requests may also include:
 - model path
 
-### Future coaching endpoint
-Should return structured fields such as:
+### Current coaching endpoints
+`/v1/coach/compare`, `/v1/coach/session-summary`, and `/v1/coach/drill-recommendation` return structured fields such as:
 - `best_hold_cards`
+- `best_hold_label`
 - `best_ev`
 - `player_ev`
-- `mistake_cost`
+- `ev_gap_from_best`
 - `mistake_severity`
+- `leak_category`
 - `headline`
 - `summary`
 - `pattern_tip`
+- `recommended_drill_focus`
+- `secondary_recommendations`
 
 Avoid returning only unstructured prose if the client needs clean rendering.
 
