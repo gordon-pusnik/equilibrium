@@ -15,6 +15,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)calculateHoldMaskWithBet:(NSInteger)bet suits:(NSArray<NSNumber *> *)suits ranks:(NSArray<NSNumber *> *)ranks holdMask:(NSUInteger *)holdMask error:(NSError * _Nullable * _Nullable)error;
 - (nullable NSDictionary *)explainHoldWithSuits:(NSArray<NSNumber *> *)suits ranks:(NSArray<NSNumber *> *)ranks holdMask:(NSUInteger)holdMask error:(NSError * _Nullable * _Nullable)error;
 - (nullable NSDictionary *)analyzeSolverWithBet:(NSInteger)bet suits:(NSArray<NSNumber *> *)suits ranks:(NSArray<NSNumber *> *)ranks error:(NSError * _Nullable * _Nullable)error;
+- (nullable NSDictionary *)analyzePlayerHoldWithBet:(NSInteger)bet suits:(NSArray<NSNumber *> *)suits ranks:(NSArray<NSNumber *> *)ranks holdMask:(NSUInteger)holdMask error:(NSError * _Nullable * _Nullable)error;
 
 @end
 

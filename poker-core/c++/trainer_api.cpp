@@ -244,13 +244,16 @@ void vp_explain_hold(const uint32_t* suits, const uint32_t* ranks, uint32_t hold
     };
     std::array<Card*, 5> card_ptrs = {&card_objs[0], &card_objs[1], &card_objs[2], &card_objs[3], &card_objs[4]};
 
-    const std::string label = AutoHold::explain_hold_label(card_ptrs, hold_mask);
-    const std::string summary = AutoHold::explain_hold_summary(card_ptrs, hold_mask);
+    const AutoHold::HoldExplanation explanation = AutoHold::explain_hold(card_ptrs, hold_mask);
 
-    std::strncpy(out_explanation->label, label.c_str(), sizeof(out_explanation->label) - 1);
-    out_explanation->label[sizeof(out_explanation->label) - 1] = '\0';
-    std::strncpy(out_explanation->summary, summary.c_str(), sizeof(out_explanation->summary) - 1);
+    std::strncpy(out_explanation->category, explanation.category.c_str(), sizeof(out_explanation->category) - 1);
+    out_explanation->category[sizeof(out_explanation->category) - 1] = '\0';
+    std::strncpy(out_explanation->headline, explanation.headline.c_str(), sizeof(out_explanation->headline) - 1);
+    out_explanation->headline[sizeof(out_explanation->headline) - 1] = '\0';
+    std::strncpy(out_explanation->summary, explanation.summary.c_str(), sizeof(out_explanation->summary) - 1);
     out_explanation->summary[sizeof(out_explanation->summary) - 1] = '\0';
+    std::strncpy(out_explanation->pattern_tip, explanation.pattern_tip.c_str(), sizeof(out_explanation->pattern_tip) - 1);
+    out_explanation->pattern_tip[sizeof(out_explanation->pattern_tip) - 1] = '\0';
 }
 
 int vp_analyze_solver(VPHandle handle, const uint32_t* suits, const uint32_t* ranks, uint32_t bet, VPSolverAnalysis* out_analysis) {
@@ -277,5 +280,31 @@ int vp_analyze_solver(VPHandle handle, const uint32_t* suits, const uint32_t* ra
     out_analysis->second_mask = second_mask;
     out_analysis->best_ev = best_ev;
     out_analysis->second_ev = second_ev;
+    return 1;
+}
+
+int vp_analyze_player_hold(VPHandle handle, const uint32_t* suits, const uint32_t* ranks, uint32_t bet, uint32_t player_hold_mask, VPMistakeAnalysis* out_analysis) {
+    if (!out_analysis || handle == nullptr) return 0;
+
+    std::array<Card, 5> card_objs = {
+        Card(suits[0], ranks[0]),
+        Card(suits[1], ranks[1]),
+        Card(suits[2], ranks[2]),
+        Card(suits[3], ranks[3]),
+        Card(suits[4], ranks[4])
+    };
+    std::array<Card*, 5> card_ptrs = {&card_objs[0], &card_objs[1], &card_objs[2], &card_objs[3], &card_objs[4]};
+
+    AutoHold::MistakeAnalysis analysis = {};
+    if (!AutoHold::analyze_player_hold(card_ptrs, bet, static_cast<TrainerContext*>(handle)->variant(), player_hold_mask, analysis)) {
+        return 0;
+    }
+
+    out_analysis->best_mask = analysis.best_mask;
+    out_analysis->best_ev = analysis.best_ev;
+    out_analysis->player_ev = analysis.player_ev;
+    out_analysis->ev_delta = analysis.ev_delta;
+    std::strncpy(out_analysis->severity, analysis.severity.c_str(), sizeof(out_analysis->severity) - 1);
+    out_analysis->severity[sizeof(out_analysis->severity) - 1] = '\0';
     return 1;
 }

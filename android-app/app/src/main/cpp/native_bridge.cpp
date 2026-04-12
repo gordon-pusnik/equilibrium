@@ -167,9 +167,11 @@ Java_com_example_videopoker_NativeBridge_nativeExplainHold(
     vp_explain_hold(c_suits, c_ranks, static_cast<uint32_t>(holdMask), &explanation);
 
     jclass string_class = env->FindClass("java/lang/String");
-    jobjectArray result = env->NewObjectArray(2, string_class, nullptr);
-    env->SetObjectArrayElement(result, 0, env->NewStringUTF(explanation.label));
-    env->SetObjectArrayElement(result, 1, env->NewStringUTF(explanation.summary));
+    jobjectArray result = env->NewObjectArray(4, string_class, nullptr);
+    env->SetObjectArrayElement(result, 0, env->NewStringUTF(explanation.category));
+    env->SetObjectArrayElement(result, 1, env->NewStringUTF(explanation.headline));
+    env->SetObjectArrayElement(result, 2, env->NewStringUTF(explanation.summary));
+    env->SetObjectArrayElement(result, 3, env->NewStringUTF(explanation.pattern_tip));
     return result;
 }
 
@@ -211,5 +213,46 @@ Java_com_example_videopoker_NativeBridge_nativeAnalyzeSolver(
     };
     jdoubleArray result = env->NewDoubleArray(4);
     env->SetDoubleArrayRegion(result, 0, 4, values);
+    return result;
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_com_example_videopoker_NativeBridge_nativeAnalyzePlayerHold(
+    JNIEnv* env,
+    jobject,
+    jlong handle,
+    jintArray suits,
+    jintArray ranks,
+    jint bet,
+    jint holdMask
+) {
+    if (env->GetArrayLength(suits) < 5 || env->GetArrayLength(ranks) < 5) {
+        return nullptr;
+    }
+
+    jint suit_values[5];
+    jint rank_values[5];
+    env->GetIntArrayRegion(suits, 0, 5, suit_values);
+    env->GetIntArrayRegion(ranks, 0, 5, rank_values);
+
+    uint32_t c_suits[5];
+    uint32_t c_ranks[5];
+    for (int i = 0; i < 5; ++i) {
+        c_suits[i] = static_cast<uint32_t>(suit_values[i]);
+        c_ranks[i] = static_cast<uint32_t>(rank_values[i]);
+    }
+
+    VPMistakeAnalysis analysis = {};
+    if (vp_analyze_player_hold(reinterpret_cast<VPHandle>(handle), c_suits, c_ranks, static_cast<uint32_t>(bet), static_cast<uint32_t>(holdMask), &analysis) != 1) {
+        return nullptr;
+    }
+
+    jclass string_class = env->FindClass("java/lang/String");
+    jobjectArray result = env->NewObjectArray(5, string_class, nullptr);
+    env->SetObjectArrayElement(result, 0, env->NewStringUTF(std::to_string(analysis.best_mask).c_str()));
+    env->SetObjectArrayElement(result, 1, env->NewStringUTF(std::to_string(analysis.best_ev).c_str()));
+    env->SetObjectArrayElement(result, 2, env->NewStringUTF(std::to_string(analysis.player_ev).c_str()));
+    env->SetObjectArrayElement(result, 3, env->NewStringUTF(std::to_string(analysis.ev_delta).c_str()));
+    env->SetObjectArrayElement(result, 4, env->NewStringUTF(analysis.severity));
     return result;
 }
