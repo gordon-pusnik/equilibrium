@@ -203,8 +203,10 @@
     VPHoldExplanation explanation = {};
     vp_explain_hold(cSuits, cRanks, (uint32_t)holdMask, &explanation);
     return @{
-        @"label": [NSString stringWithUTF8String:explanation.label],
-        @"summary": [NSString stringWithUTF8String:explanation.summary]
+        @"category": [NSString stringWithUTF8String:explanation.category],
+        @"headline": [NSString stringWithUTF8String:explanation.headline],
+        @"summary": [NSString stringWithUTF8String:explanation.summary],
+        @"patternTip": [NSString stringWithUTF8String:explanation.pattern_tip]
     };
 }
 
@@ -236,6 +238,38 @@
         @"secondMask": @(analysis.second_mask),
         @"bestEV": @(analysis.best_ev),
         @"secondEV": @(analysis.second_ev)
+    };
+}
+
+- (nullable NSDictionary *)analyzePlayerHoldWithBet:(NSInteger)bet suits:(NSArray<NSNumber *> *)suits ranks:(NSArray<NSNumber *> *)ranks holdMask:(NSUInteger)holdMask error:(NSError * _Nullable * _Nullable)error {
+    if (suits.count != 5 || ranks.count != 5) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"PokerEngine" code:7 userInfo:@{NSLocalizedDescriptionKey: @"Exactly five cards are required"}];
+        }
+        return nil;
+    }
+
+    uint32_t cSuits[5];
+    uint32_t cRanks[5];
+    for (NSUInteger i = 0; i < 5; i++) {
+        cSuits[i] = (uint32_t)suits[i].unsignedIntValue;
+        cRanks[i] = (uint32_t)ranks[i].unsignedIntValue;
+    }
+
+    VPMistakeAnalysis analysis = {};
+    if (vp_analyze_player_hold(_handle, cSuits, cRanks, (uint32_t)bet, (uint32_t)holdMask, &analysis) != 1) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"PokerEngine" code:10 userInfo:@{NSLocalizedDescriptionKey: @"Failed to analyze player hold"}];
+        }
+        return nil;
+    }
+
+    return @{
+        @"bestMask": @(analysis.best_mask),
+        @"bestEV": @(analysis.best_ev),
+        @"playerEV": @(analysis.player_ev),
+        @"evDelta": @(analysis.ev_delta),
+        @"severity": [NSString stringWithUTF8String:analysis.severity]
     };
 }
 
