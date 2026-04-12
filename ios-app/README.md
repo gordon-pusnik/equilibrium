@@ -36,36 +36,38 @@ Command-line build verification example:
   - `Jacks or Better 8/5`
 - Expected RTP display for the selected variant
 - Paytable display that updates with the current bet
-- Engine picker for solver, rule, and ML
-- `Deal` / `Draw` hand flow
-- `Autohold` toggle
+- Solver-backed `Deal` / `Draw` hand flow
+- `Best Hold` toggle
 - Manual hold selection when autohold is off
-- Switch engines after dealing to compare recommended holds on the same hand
-- Expandable explanation panel for the recommended hold
-- Solver-only EV detail rows for best EV, next-best hold, and EV edge
+- Expandable deterministic coaching explanation panel for the recommended hold
+- Mistake severity feedback for player-selected holds
+- Solver EV detail rows for best EV, next-best hold, and EV edge
 - Winning-card highlighting in the final hand
 
 ## ML Models
 
-The app no longer exposes a model-path field. In ML mode it loads a bundled model based on the selected variant:
+The app no longer exposes a model-path field. Variant-specific ML models remain bundled for shared-core evaluation and future product work:
 
 - `jacks_or_better_9_6` -> `VideoPokerTrainer/Resources/modeljob96.json`
 - `jacks_or_better_8_5` -> `VideoPokerTrainer/Resources/modeljob85.json`
+
+The current trainer UI does not expose ML mode or engine switching.
 
 ## Bridge Responsibilities
 
 The Objective-C++ bridge exposes the shared trainer API to SwiftUI for:
 
 - handle creation and destruction
-- engine selection
 - variant selection
-- ML model loading
+- engine selection for internal/native configuration
+- ML model loading for shared-core support
 - deal and draw operations
-- hold recalculation for an already-dealt hand
 - hold explanation lookup
 - solver EV comparison analysis
+- player-hold mistake analysis for coaching feedback
 
 ## Notes
 
 - The iOS app uses the same native strategy logic as Android and the CLI tools.
-- The ML engine is currently useful for side-by-side comparison, but the rule and solver engines remain the stronger references.
+- The current iOS trainer experience is solver-backed.
+- Rule and ML engine support still exists in the shared core and CLI tools, but it is not exposed in the current trainer UI.

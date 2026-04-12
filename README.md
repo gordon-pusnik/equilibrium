@@ -1,6 +1,6 @@
 # Equilibrium
 
-Equilibrium is a multi-platform video poker trainer and analysis suite built around a shared C++ core. It currently supports two Jacks or Better paytables, exposes solver, rule, and ML autohold engines, ships mobile trainer apps for Android and iOS, and includes CLI and FastAPI interfaces for simulation and integration.
+Equilibrium is a multi-platform video poker trainer and analysis suite built around a shared C++ core. It currently supports two Jacks or Better paytables, exposes solver, rule, and ML engines in the CLI/core, ships solver-backed mobile trainer apps for Android and iOS, and includes FastAPI interfaces for strategy, evaluation, and deterministic coaching.
 
 ## Current Features
 
@@ -17,6 +17,7 @@ Equilibrium is a multi-platform video poker trainer and analysis suite built aro
 - Android app with Compose + JNI bridge
 - iOS app with SwiftUI + Objective-C++ bridge
 - FastAPI server backed by the same native trainer API
+- Deterministic premium coaching backend with compare, session-summary, and drill-recommendation endpoints
 
 ## Supported Variants
 
@@ -47,8 +48,10 @@ flowchart TD
     J --> B
     J --> C
     J --> E
-    J --> F
-    J --> G
+    D --> K[Deterministic coaching services]
+    K --> E
+    D --> F
+    D --> G
 ```
 
 ## Repository Layout
@@ -162,6 +165,8 @@ The mobile apps currently bundle variant-specific ML models:
 - `ml/modeljob96.json` for `jacks_or_better_9_6`
 - `ml/modeljob85.json` for `jacks_or_better_8_5`
 
+The current mobile trainer UI is solver-backed and does not expose engine switching.
+
 ## API
 
 The API lives in `api-server/main.py` and loads `api-server/libvideopoker.so` at startup.
@@ -237,6 +242,67 @@ Response:
 }
 ```
 
+### `POST /v1/coach/compare`
+
+Request:
+
+```json
+{
+  "variant": "jacks_or_better_9_6",
+  "hand": ["Ah", "Kh", "Qh", "Jh", "2c"],
+  "bet": 5,
+  "top_n": 3
+}
+```
+
+Response shape includes:
+
+```json
+{
+  "variant": "jacks_or_better_9_6",
+  "best_hold_cards": ["Ah", "Kh", "Qh", "Jh"],
+  "best_hold_label": "four_to_royal",
+  "best_ev": 18.5,
+  "candidates": [
+    {
+      "rank": 1,
+      "hold_cards": ["Ah", "Kh", "Qh", "Jh"],
+      "label": "four_to_royal",
+      "ev": 18.5,
+      "ev_gap_from_best": 0.0,
+      "headline": "Four to a royal flush",
+      "summary": "Keep the four royal cards because this premium draw has the highest expected value.",
+      "pattern_tip": "When you already have four royal cards in one suit, avoid breaking the draw.",
+      "explanation": "This is the strongest play because four_to_royal returns the highest expected value in this spot."
+    }
+  ]
+}
+```
+
+### `POST /v1/coach/session-summary`
+
+Accepts analyzed hand records and returns deterministic aggregates such as:
+- `hands_played`
+- `perfect_count`
+- `accuracy_rate`
+- `total_ev_lost`
+- `biggest_mistake`
+- `most_common_leak`
+- `top_leak_categories`
+- `recommended_drill_focus`
+- `summary_headline`
+- `summary_text`
+
+### `POST /v1/coach/drill-recommendation`
+
+Accepts analyzed hand records and returns a deterministic drill target with:
+- `recommended_category`
+- `priority`
+- `reason`
+- `supporting_stats`
+- `suggested_focus`
+- `secondary_recommendations`
+
 ## Mobile Apps
 
 ### Android
@@ -248,13 +314,11 @@ Current Android features:
 - game dropdown with `Jacks or Better 9/6` and `Jacks or Better 8/5`
 - expected RTP label for the selected variant
 - variant-aware paytable that updates with the current bet
-- engine selector for solver, rule, and ML/AI mode
 - autohold toggle
-- `Deal` / `Draw` flow that matches the iOS app
-- engine switching after a deal to compare recommended holds on the same hand
-- expandable explanation panel with strategy text
-- solver-only EV detail rows for best EV, next best hold, and EV edge
-- bundled variant-specific ML models
+- solver-backed `Deal` / `Draw` trainer flow
+- deterministic coaching explanation panel with headline, summary, and optional pattern tip
+- solver EV detail rows for best EV, next best hold, and EV edge
+- mistake severity feedback for player-selected holds
 
 ### iOS
 
@@ -265,17 +329,15 @@ Current iOS features:
 - game picker with `Jacks or Better 9/6` and `Jacks or Better 8/5`
 - expected RTP label for the selected variant
 - variant-aware paytable that updates with the current bet
-- engine picker for solver, rule, and ML
 - autohold toggle
-- `Deal` / `Draw` flow
-- engine switching after a deal to compare suggested holds
-- expandable explanation panel
-- solver-only EV comparison details
-- bundled variant-specific ML models
+- solver-backed `Deal` / `Draw` trainer flow
+- deterministic coaching explanation panel with headline, summary, and optional pattern tip
+- solver EV comparison details
+- mistake severity feedback for player-selected holds
 
 ## Notes On ML Quality
 
-The ML engine is in place for experimentation and UI comparison, but it is currently weaker than the rule and solver engines. Use `verify_rtp` to measure the gap for a specific model and variant before treating it as production-quality strategy.
+The ML engine is in place for experimentation, CLI evaluation, and future product work, but it is currently weaker than the rule and solver engines. Use `verify_rtp` to measure the gap for a specific model and variant before treating it as production-quality strategy.
 
 ## Windows Desktop App
 

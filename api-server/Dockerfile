@@ -30,6 +30,7 @@ RUN g++ -std=c++17 -O3 -fPIC -shared \
 
 # Copy the API server code
 COPY api-server/main.py /app/
+COPY api-server/app /app/app
 COPY api-server/requirements.txt /app/
 
 # Install Python dependencies
