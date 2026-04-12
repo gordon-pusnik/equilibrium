@@ -9,6 +9,8 @@ node_modules/
 .gradle/
 DerivedData/
 .env
+.venv
+.venv312
 .cxx
 Debug/
 .idea
