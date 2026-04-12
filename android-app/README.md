@@ -30,13 +30,12 @@ GRADLE_USER_HOME=/tmp/gradle-home bash ./gradlew :app:assembleDebug
   - `Jacks or Better 8/5`
 - Expected RTP display for the selected variant
 - Paytable display that updates with the current bet
-- Engine selector for solver, rule, and ML/AI mode
-- `Deal` / `Draw` hand flow
-- `Autohold` toggle
+- Solver-backed `Deal` / `Draw` hand flow
+- `Best Hold` toggle
 - Manual hold toggling when autohold is off
-- Switch engines after dealing to compare recommended holds on the same hand
-- Explanation panel for why the recommended hold was chosen
-- Solver-only EV details:
+- Deterministic coaching explanation panel for the solver-recommended hold
+- Mistake severity feedback for player-selected holds
+- Solver EV details:
   - best EV
   - next-best hold
   - EV edge
@@ -44,26 +43,29 @@ GRADLE_USER_HOME=/tmp/gradle-home bash ./gradlew :app:assembleDebug
 
 ## ML Models
 
-The app no longer asks for a model path in the UI. In ML mode it uses a bundled model based on the selected variant:
+The app no longer asks for a model path in the UI. Variant-specific ML models remain bundled for shared-core evaluation and future product work:
 
 - `jacks_or_better_9_6` -> `app/src/main/assets/modeljob96.json`
 - `jacks_or_better_8_5` -> `app/src/main/assets/modeljob85.json`
+
+The current trainer UI does not expose ML mode or engine switching.
 
 ## Native Bridge Surface
 
 The Android bridge uses the shared trainer API to:
 
 - create and destroy a native trainer handle
-- set engine
 - set variant
-- load an ML model
+- set engine for internal/native configuration
+- load an ML model for shared-core support
 - deal a hand with a suggested hold mask
 - draw with a supplied hold mask
-- recalculate suggested holds for an already-dealt hand
 - request hold explanations
 - request solver EV comparison data
+- analyze player holds against solver-best play for coaching feedback
 
 ## Notes
 
 - The Android UI is top-pinned so the layout stays stable when the final hand appears or disappears.
-- The rule and solver engines are the stronger strategy references today. The ML engine is present for comparison and experimentation.
+- The current Android trainer experience is solver-backed.
+- Rule and ML engine support still exists in the shared core and CLI tools, but it is not exposed in the current trainer UI.
