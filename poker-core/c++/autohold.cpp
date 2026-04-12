@@ -72,6 +72,18 @@ const char* kRuleStrategyTable[] = {
     "Hold Nothing"
 };
 
+struct MistakeThresholds {
+    double very_close_max;
+    double small_leak_max;
+    double moderate_max;
+};
+
+constexpr MistakeThresholds kMistakeThresholds = {
+    0.02,
+    0.10,
+    0.25
+};
+
 struct LiteCard {
     uint8_t suit;
     uint8_t rank;
@@ -332,6 +344,37 @@ void evaluate_mask_ev(
     }
 }
 
+double expected_value_for_mask(const std::array<Card*, 5>& cards, uint32_t bet, GameVariant variant, uint32_t mask) {
+    bool in_hand_flags[52] = {false};
+    for (uint32_t i = 0; i < 5; i++) {
+        const uint32_t deck_idx = (cards[i]->suit() - SPADES) * 13 + (cards[i]->rank() - TWO);
+        in_hand_flags[deck_idx] = true;
+    }
+
+    std::vector<LiteCard> remaining;
+    remaining.reserve(47);
+    for (uint32_t idx = 0; idx < 52; idx++) {
+        if (!in_hand_flags[idx]) {
+            remaining.push_back(kFullDeck[idx]);
+        }
+    }
+
+    std::array<LiteCard, 5> base_cards = {};
+    std::array<uint8_t, 5> discard_slots = {0, 0, 0, 0, 0};
+    uint8_t discard_count = 0;
+    for (uint8_t i = 0; i < 5; i++) {
+        base_cards[i] = {static_cast<uint8_t>(cards[i]->suit()), static_cast<uint8_t>(cards[i]->rank())};
+        if ((mask & (1u << i)) == 0) {
+            discard_slots[discard_count++] = i;
+        }
+    }
+
+    uint64_t total_payout = 0;
+    uint32_t ways = 0;
+    evaluate_mask_ev(remaining, discard_slots, discard_count, base_cards, bet, variant, total_payout, ways);
+    return static_cast<double>(total_payout) / static_cast<double>(ways);
+}
+
 void set_held_from_kept(const std::array<Card*, 5>& cards) {
     for (uint8_t i = 0; i < 5; i++) {
         cards[i]->set_held(cards[i]->is_kept());
@@ -368,6 +411,7 @@ std::vector<uint32_t> mask_ranks(const std::array<Card*, 5>& cards, uint8_t mask
 bool mask_is_4_to_straight_flush(const std::array<Card*, 5>& cards, uint8_t mask);
 bool mask_is_low_pair(const std::array<Card*, 5>& cards, uint8_t mask);
 bool mask_is_4_to_outside_straight(const std::array<Card*, 5>& cards, uint8_t mask);
+bool mask_is_4_to_inside_straight(const std::array<Card*, 5>& cards, uint8_t mask);
 bool mask_is_2_suited_high(const std::array<Card*, 5>& cards, uint8_t mask);
 bool mask_is_2_unsuited_high(const std::array<Card*, 5>& cards, uint8_t mask);
 bool select_best_mask(
@@ -391,6 +435,7 @@ bool pred_unsuited_jk(const std::array<Card*, 5>& cards, uint8_t mask);
 bool pred_suited_at(const std::array<Card*, 5>& cards, uint8_t mask);
 bool pred_suited_kt(const std::array<Card*, 5>& cards, uint8_t mask);
 bool pred_suited_qt(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_3_to_flush(const std::array<Card*, 5>& cards, uint8_t mask);
 bool pred_3_to_sf_medium(const std::array<Card*, 5>& cards, uint8_t mask);
 bool pred_inside_3_high(const std::array<Card*, 5>& cards, uint8_t mask);
 bool pred_one_ace(const std::array<Card*, 5>& cards, uint8_t mask);
@@ -398,6 +443,14 @@ bool pred_one_king(const std::array<Card*, 5>& cards, uint8_t mask);
 bool pred_one_queen(const std::array<Card*, 5>& cards, uint8_t mask);
 bool pred_one_jack(const std::array<Card*, 5>& cards, uint8_t mask);
 bool pred_one_ten(const std::array<Card*, 5>& cards, uint8_t mask);
+bool pred_single_high_card(const std::array<Card*, 5>& cards, uint8_t mask);
+
+struct ExplanationTemplate {
+    const char* category;
+    const char* headline;
+    const char* summary;
+    const char* pattern_tip;
+};
 
 uint8_t kept_mask_from_win_eval(const std::array<Card*, 5>& cards, uint32_t* out_win_type = nullptr) {
     std::array<Card, 5> copies = {
@@ -429,92 +482,123 @@ bool mask_is_high_pair(const std::array<Card*, 5>& cards, uint8_t mask) {
     return ranks[0] == ranks[1] && ranks[0] >= JACK;
 }
 
-const char* explanation_summary_for_label(const std::string& label) {
-    if (label == "Pat royal flush") return "Keep all five cards because you already have the top-paying made hand.";
-    if (label == "Pat straight flush") return "Keep all five cards because the hand is already a straight flush.";
-    if (label == "Pat four of a kind") return "Keep the made four of a kind rather than drawing away from a premium winner.";
-    if (label == "4 to a royal flush") return "Keep the four royal cards because drawing to a royal is the strongest premium draw.";
-    if (label == "Pat full house") return "Keep the full house because it is already a strong made hand.";
-    if (label == "Pat flush") return "Keep the made flush instead of breaking a paying hand.";
-    if (label == "Pat three of a kind") return "Keep the trips and draw two cards to improve to a full house or four of a kind.";
-    if (label == "Pat straight") return "Keep the made straight because it already returns a payout.";
-    if (label == "4 to a straight flush") return "Keep the four-card straight flush draw because it combines straight and flush potential.";
-    if (label == "Pat two pair") return "Keep both pairs and draw one card for a full house.";
-    if (label == "High pair") return "Keep the high pair because it already pays and can improve further.";
-    if (label == "3 to a royal flush") return "Keep the suited royal cards because they retain premium draw value.";
-    if (label == "4 to a flush") return "Keep four suited cards to draw one card toward a flush.";
-    if (label == "Low pair") return "Keep the pair and draw three cards to improve to trips, two pair, full house, or quads.";
-    if (label == "4 to an outside straight") return "Keep the four-card open straight draw because it has multiple improving outs.";
-    if (label == "2 suited high cards") return "Keep the suited high cards because they can make strong paying draws and high pairs.";
-    if (label == "3 to a straight flush") return "Keep the suited connected cards because they retain straight flush potential.";
-    if (label == "2 high cards") return "Keep the high cards because they can form a paying high pair or stronger draw.";
-    if (label == "Suited ten-jack" || label == "Suited queen-jack" || label == "Suited king-queen" ||
-        label == "Suited jack-king" || label == "Suited ace-high draw" || label == "Suited ace-ten" ||
-        label == "Suited king-ten" || label == "Suited queen-ten") {
-        return "Keep the suited high cards because they preserve both high-card value and flush potential.";
+ExplanationTemplate make_template(const char* category, const char* headline, const char* summary, const char* pattern_tip = "") {
+    return {category, headline, summary, pattern_tip};
+}
+
+ExplanationTemplate explanation_template_for_category(const char* category) {
+    if (std::strcmp(category, "royal_flush") == 0) {
+        return make_template("royal_flush", "Made royal flush", "Keep all five cards because the royal flush is already complete.", "A pat royal is the top-paying made hand. Never break it.");
     }
-    if (label == "Unsuited ten-jack" || label == "Unsuited queen-jack" || label == "Unsuited king-queen" ||
-        label == "Unsuited jack-king") {
-        return "Keep the connected high cards because they retain strong high-pair and straight-building value.";
+    if (std::strcmp(category, "straight_flush") == 0) {
+        return make_template("straight_flush", "Made straight flush", "Keep all five cards because the straight flush is already a premium made hand.", "When the straight flush is complete, there is no draw worth chasing.");
     }
-    if (label == "Single ace" || label == "Single king" || label == "Single queen" || label == "Single jack" || label == "Single ten") {
-        return "Keep the best single high card when no stronger made hand or draw is available.";
+    if (std::strcmp(category, "four_of_a_kind") == 0) {
+        return make_template("four_of_a_kind", "Made four of a kind", "Keep the quads because they already return a strong payout.", "Premium made hands should stay intact.");
     }
-    if (label == "Hold nothing") return "Discard all five cards because there is no hold with better draw value.";
-    return "Keep this combination because it best matches the strongest available strategy pattern.";
+    if (std::strcmp(category, "full_house") == 0) {
+        return make_template("full_house", "Made full house", "Keep the full house because it is already a strong paying hand.", "Do not break a full house trying to improve a hand that already pays well.");
+    }
+    if (std::strcmp(category, "pat_flush") == 0) {
+        return make_template("pat_flush", "Made flush", "Keep the flush because it already pays without needing another draw.", "Once a flush is made, protect the payout.");
+    }
+    if (std::strcmp(category, "pat_straight") == 0) {
+        return make_template("pat_straight", "Made straight", "Keep the straight because it is already a paying made hand.", "Pat straights should stay intact in Jacks or Better.");
+    }
+    if (std::strcmp(category, "three_of_a_kind") == 0) {
+        return make_template("three_of_a_kind", "Keep three of a kind", "Hold the trips and draw two cards to improve to a full house or four of a kind.", "Trips are strong because several premium upgrades remain.");
+    }
+    if (std::strcmp(category, "two_pair") == 0) {
+        return make_template("two_pair", "Keep two pair", "Hold both pairs and draw one card for the full house chance.", "With two pair, the main upgrade is the full house draw.");
+    }
+    if (std::strcmp(category, "high_pair") == 0) {
+        return make_template("high_pair", "Keep the high pair", "Hold the paying pair because it already returns value and can still improve.", "Jacks or better pairs are paying made hands and usually anchor the hold.");
+    }
+    if (std::strcmp(category, "low_pair") == 0) {
+        return make_template("low_pair", "Keep the low pair", "Hold the pair and draw three cards to improve to two pair, trips, full house, or four of a kind.", "A low pair beats most unmade draws because it has several upgrade paths.");
+    }
+    if (std::strcmp(category, "four_to_royal") == 0) {
+        return make_template("four_to_royal", "Four to a royal flush", "Keep the four royal cards because this is the strongest premium draw available.", "Four to a royal is one of the most valuable draws in the game.");
+    }
+    if (std::strcmp(category, "four_to_straight_flush") == 0) {
+        return make_template("four_to_straight_flush", "Four to a straight flush", "Hold the four-card straight flush draw because it combines straight and flush potential.", "Straight-flush draws carry both premium upside and multiple ways to improve.");
+    }
+    if (std::strcmp(category, "three_to_royal") == 0) {
+        return make_template("three_to_royal", "Three to a royal flush", "Keep the suited royal cards because they preserve premium royal and high-card potential.", "Three-card royal draws stay valuable when the cards are suited and high.");
+    }
+    if (std::strcmp(category, "four_card_flush") == 0) {
+        return make_template("four_card_flush", "Four-card flush draw", "Hold four suited cards and draw one to try to complete the flush.", "With four to a flush, the draw is straightforward: keep the suit together.");
+    }
+    if (std::strcmp(category, "three_card_flush") == 0) {
+        return make_template("three_card_flush", "Three-card flush draw", "Hold the three suited cards because they retain flush potential without a stronger made hand available.", "Three-card flushes are secondary draws and only matter when stronger categories are absent.");
+    }
+    if (std::strcmp(category, "four_to_open_straight") == 0) {
+        return make_template("four_to_open_straight", "Four to an open straight", "Hold the four-card open straight draw because it has multiple straight-completing outs.", "Open-ended straights are stronger than inside straights because they can fill on either end.");
+    }
+    if (std::strcmp(category, "four_to_inside_straight") == 0) {
+        return make_template("four_to_inside_straight", "Four to an inside straight", "Hold the inside straight draw because it is the best available pattern in this hand.", "Inside straights are weaker than open-ended ones, so they appear only when better options are absent.");
+    }
+    if (std::strcmp(category, "three_to_straight_flush") == 0) {
+        return make_template("three_to_straight_flush", "Three to a straight flush", "Keep the suited connected cards because they preserve straight-flush potential.", "Three-card straight-flush draws matter when they are the best coordinated draw in the hand.");
+    }
+    if (std::strcmp(category, "two_suited_high_cards") == 0) {
+        return make_template("two_suited_high_cards", "Two suited high cards", "Hold the suited high cards because they preserve both high-pair value and flush potential.", "Suited high cards can improve through pairs, premium draws, and flushes.");
+    }
+    if (std::strcmp(category, "two_high_cards") == 0) {
+        return make_template("two_high_cards", "Two high cards", "Hold the high cards because they preserve high-pair value when no better made hand or draw is available.", "Unsuited high cards are a fallback category behind stronger coordinated draws.");
+    }
+    if (std::strcmp(category, "single_high_card") == 0) {
+        return make_template("single_high_card", "Single high card", "Keep the best single high card because no stronger made hand or coordinated draw is available.", "Single high cards are late-order holds used only after stronger patterns are ruled out.");
+    }
+    if (std::strcmp(category, "garbage_hand") == 0) {
+        return make_template("garbage_hand", "Discard all five cards", "Throw all five cards away because no hold has better draw value than starting over.", "Garbage hands have no paying made hand and no draw worth preserving.");
+    }
+    if (std::strcmp(category, "best_expected_value_hold") == 0) {
+        return make_template("best_expected_value_hold", "Best expected value hold", "Keep this exact combination because it is the strongest solver-backed hold for the hand.", "");
+    }
+    return make_template("best_expected_value_hold", "Best expected value hold", "Keep this exact combination because it is the strongest solver-backed hold for the hand.", "");
 }
 
 std::string rule_style_label_for_mask(const std::array<Card*, 5>& cards, uint8_t hold_mask) {
     if (hold_mask == 0) {
-        return "Hold nothing";
+        return "Discard all five cards";
     }
 
     uint32_t win_type = NONE;
     if (kept_mask_from_win_eval(cards, &win_type) == hold_mask) {
         switch (win_type) {
-            case ROYALFLUSH: return "Pat royal flush";
-            case STRAIGHTFLUSH: return "Pat straight flush";
-            case FOUROFAKIND: return "Pat four of a kind";
-            case FULLHOUSE: return "Pat full house";
-            case FLUSH: return "Pat flush";
-            case THREEOFAKIND: return "Pat three of a kind";
-            case STRAIGHT: return "Pat straight";
-            case TWOPAIR: return "Pat two pair";
-            case HIGHPAIR: return "High pair";
+            case ROYALFLUSH: return "Made royal flush";
+            case STRAIGHTFLUSH: return "Made straight flush";
+            case FOUROFAKIND: return "Made four of a kind";
+            case FULLHOUSE: return "Made full house";
+            case FLUSH: return "Made flush";
+            case THREEOFAKIND: return "Keep three of a kind";
+            case STRAIGHT: return "Made straight";
+            case TWOPAIR: return "Keep two pair";
+            case HIGHPAIR: return "Keep the high pair";
             default: break;
         }
     }
 
     uint8_t selected_mask = 0;
-    if (select_best_mask(cards, pred_4_to_royal, selected_mask) && selected_mask == hold_mask) return "4 to a royal flush";
-    if (select_best_mask(cards, mask_is_4_to_straight_flush, selected_mask) && selected_mask == hold_mask) return "4 to a straight flush";
-    if (select_best_mask(cards, pred_3_to_royal, selected_mask) && selected_mask == hold_mask) return "3 to a royal flush";
-    if (select_best_mask(cards, pred_4_to_flush, selected_mask) && selected_mask == hold_mask) return "4 to a flush";
-    if (select_best_mask(cards, mask_is_low_pair, selected_mask) && selected_mask == hold_mask) return "Low pair";
-    if (select_best_mask(cards, mask_is_4_to_outside_straight, selected_mask) && selected_mask == hold_mask) return "4 to an outside straight";
-    if (select_best_mask(cards, mask_is_2_suited_high, selected_mask) && selected_mask == hold_mask) return "2 suited high cards";
-    if (select_best_mask(cards, pred_3_to_sf_strong, selected_mask) && selected_mask == hold_mask) return "3 to a straight flush";
-    if (select_best_mask(cards, mask_is_2_unsuited_high, selected_mask) && selected_mask == hold_mask) return "2 high cards";
-    if (select_best_mask(cards, pred_suited_tj, selected_mask) && selected_mask == hold_mask) return "Suited ten-jack";
-    if (select_best_mask(cards, pred_suited_qj, selected_mask) && selected_mask == hold_mask) return "Suited queen-jack";
-    if (select_best_mask(cards, pred_suited_kq, selected_mask) && selected_mask == hold_mask) return "Suited king-queen";
-    if (select_best_mask(cards, pred_suited_jk, selected_mask) && selected_mask == hold_mask) return "Suited jack-king";
-    if (select_best_mask(cards, pred_suited_ak_aq_aj, selected_mask) && selected_mask == hold_mask) return "Suited ace-high draw";
-    if (select_best_mask(cards, pred_unsuited_tj, selected_mask) && selected_mask == hold_mask) return "Unsuited ten-jack";
-    if (select_best_mask(cards, pred_unsuited_qj, selected_mask) && selected_mask == hold_mask) return "Unsuited queen-jack";
-    if (select_best_mask(cards, pred_unsuited_kq, selected_mask) && selected_mask == hold_mask) return "Unsuited king-queen";
-    if (select_best_mask(cards, pred_unsuited_jk, selected_mask) && selected_mask == hold_mask) return "Unsuited jack-king";
-    if (select_best_mask(cards, pred_suited_at, selected_mask) && selected_mask == hold_mask) return "Suited ace-ten";
-    if (select_best_mask(cards, pred_suited_kt, selected_mask) && selected_mask == hold_mask) return "Suited king-ten";
-    if (select_best_mask(cards, pred_suited_qt, selected_mask) && selected_mask == hold_mask) return "Suited queen-ten";
-    if (select_best_mask(cards, pred_3_to_sf_medium, selected_mask) && selected_mask == hold_mask) return "3 to a straight flush";
-    if (select_best_mask(cards, pred_inside_3_high, selected_mask) && selected_mask == hold_mask) return "3 high cards to an inside straight";
-    if (select_best_mask(cards, pred_one_ace, selected_mask) && selected_mask == hold_mask) return "Single ace";
-    if (select_best_mask(cards, pred_one_king, selected_mask) && selected_mask == hold_mask) return "Single king";
-    if (select_best_mask(cards, pred_one_queen, selected_mask) && selected_mask == hold_mask) return "Single queen";
-    if (select_best_mask(cards, pred_one_jack, selected_mask) && selected_mask == hold_mask) return "Single jack";
-    if (select_best_mask(cards, pred_one_ten, selected_mask) && selected_mask == hold_mask) return "Single ten";
-    if (mask_is_high_pair(cards, hold_mask)) return "High pair";
+    if (select_best_mask(cards, pred_4_to_royal, selected_mask) && selected_mask == hold_mask) return "Four to a royal flush";
+    if (select_best_mask(cards, mask_is_4_to_straight_flush, selected_mask) && selected_mask == hold_mask) return "Four to a straight flush";
+    if (select_best_mask(cards, pred_3_to_royal, selected_mask) && selected_mask == hold_mask) return "Three to a royal flush";
+    if (select_best_mask(cards, pred_4_to_flush, selected_mask) && selected_mask == hold_mask) return "Four-card flush draw";
+    if (select_best_mask(cards, mask_is_low_pair, selected_mask) && selected_mask == hold_mask) return "Keep the low pair";
+    if (select_best_mask(cards, mask_is_4_to_outside_straight, selected_mask) && selected_mask == hold_mask) return "Four to an open straight";
+    if (select_best_mask(cards, mask_is_4_to_inside_straight, selected_mask) && selected_mask == hold_mask) return "Four to an inside straight";
+    if (select_best_mask(cards, mask_is_2_suited_high, selected_mask) && selected_mask == hold_mask) return "Two suited high cards";
+    if (select_best_mask(cards, pred_3_to_sf_strong, selected_mask) && selected_mask == hold_mask) return "Three to a straight flush";
+    if (select_best_mask(cards, pred_3_to_flush, selected_mask) && selected_mask == hold_mask) return "Three-card flush draw";
+    if (select_best_mask(cards, mask_is_2_unsuited_high, selected_mask) && selected_mask == hold_mask) return "Two high cards";
+    if (select_best_mask(cards, pred_3_to_sf_medium, selected_mask) && selected_mask == hold_mask) return "Three to a straight flush";
+    if (select_best_mask(cards, pred_one_ace, selected_mask) && selected_mask == hold_mask) return "Single high card";
+    if (select_best_mask(cards, pred_one_king, selected_mask) && selected_mask == hold_mask) return "Single high card";
+    if (select_best_mask(cards, pred_one_queen, selected_mask) && selected_mask == hold_mask) return "Single high card";
+    if (select_best_mask(cards, pred_one_jack, selected_mask) && selected_mask == hold_mask) return "Single high card";
+    if (select_best_mask(cards, pred_one_ten, selected_mask) && selected_mask == hold_mask) return "Single high card";
+    if (mask_is_high_pair(cards, hold_mask)) return "Keep the high pair";
 
     return "Best expected value hold";
 }
@@ -865,12 +949,59 @@ bool pred_unsuited_jk(const std::array<Card*, 5>& cards, uint8_t mask) { return 
 bool pred_suited_at(const std::array<Card*, 5>& cards, uint8_t mask) { return mask_is_specific_pair(cards, mask, ACE, TEN, true); }
 bool pred_suited_kt(const std::array<Card*, 5>& cards, uint8_t mask) { return mask_is_specific_pair(cards, mask, KING, TEN, true); }
 bool pred_suited_qt(const std::array<Card*, 5>& cards, uint8_t mask) { return mask_is_specific_pair(cards, mask, QUEEN, TEN, true); }
+bool pred_3_to_flush(const std::array<Card*, 5>& cards, uint8_t mask) {
+    return mask_is_n_to_flush(cards, mask, 3) &&
+           !mask_is_n_to_royal(cards, mask, 3) &&
+           !mask_is_3_to_straight_flush_tuned(cards, mask, 2, 1) &&
+           !mask_is_3_to_straight_flush_tuned(cards, mask, 1, 2);
+}
 bool pred_inside_3_high(const std::array<Card*, 5>& cards, uint8_t mask) { return mask_is_inside_with_3_high(cards, mask); }
 bool pred_one_ace(const std::array<Card*, 5>& cards, uint8_t mask) { return mask_is_1_rank(cards, mask, ACE); }
 bool pred_one_king(const std::array<Card*, 5>& cards, uint8_t mask) { return mask_is_1_rank(cards, mask, KING); }
 bool pred_one_queen(const std::array<Card*, 5>& cards, uint8_t mask) { return mask_is_1_rank(cards, mask, QUEEN); }
 bool pred_one_jack(const std::array<Card*, 5>& cards, uint8_t mask) { return mask_is_1_rank(cards, mask, JACK); }
 bool pred_one_ten(const std::array<Card*, 5>& cards, uint8_t mask) { return mask_is_1_rank(cards, mask, TEN); }
+bool pred_single_high_card(const std::array<Card*, 5>& cards, uint8_t mask) { return mask_is_1_high(cards, mask); }
+
+std::string explanation_category_for_mask(const std::array<Card*, 5>& cards, uint8_t hold_mask) {
+    if (hold_mask == 0) {
+        return "garbage_hand";
+    }
+
+    uint32_t win_type = NONE;
+    if (kept_mask_from_win_eval(cards, &win_type) == hold_mask) {
+        switch (win_type) {
+            case ROYALFLUSH: return "royal_flush";
+            case STRAIGHTFLUSH: return "straight_flush";
+            case FOUROFAKIND: return "four_of_a_kind";
+            case FULLHOUSE: return "full_house";
+            case FLUSH: return "pat_flush";
+            case THREEOFAKIND: return "three_of_a_kind";
+            case STRAIGHT: return "pat_straight";
+            case TWOPAIR: return "two_pair";
+            case HIGHPAIR: return "high_pair";
+            default: break;
+        }
+    }
+
+    uint8_t selected_mask = 0;
+    if (select_best_mask(cards, pred_4_to_royal, selected_mask) && selected_mask == hold_mask) return "four_to_royal";
+    if (select_best_mask(cards, mask_is_4_to_straight_flush, selected_mask) && selected_mask == hold_mask) return "four_to_straight_flush";
+    if (select_best_mask(cards, pred_3_to_royal, selected_mask) && selected_mask == hold_mask) return "three_to_royal";
+    if (select_best_mask(cards, pred_4_to_flush, selected_mask) && selected_mask == hold_mask) return "four_card_flush";
+    if (select_best_mask(cards, mask_is_low_pair, selected_mask) && selected_mask == hold_mask) return "low_pair";
+    if (select_best_mask(cards, mask_is_4_to_outside_straight, selected_mask) && selected_mask == hold_mask) return "four_to_open_straight";
+    if (select_best_mask(cards, mask_is_4_to_inside_straight, selected_mask) && selected_mask == hold_mask) return "four_to_inside_straight";
+    if (select_best_mask(cards, mask_is_2_suited_high, selected_mask) && selected_mask == hold_mask) return "two_suited_high_cards";
+    if (select_best_mask(cards, pred_3_to_sf_strong, selected_mask) && selected_mask == hold_mask) return "three_to_straight_flush";
+    if (select_best_mask(cards, pred_3_to_flush, selected_mask) && selected_mask == hold_mask) return "three_card_flush";
+    if (select_best_mask(cards, mask_is_2_unsuited_high, selected_mask) && selected_mask == hold_mask) return "two_high_cards";
+    if (select_best_mask(cards, pred_3_to_sf_medium, selected_mask) && selected_mask == hold_mask) return "three_to_straight_flush";
+    if (select_best_mask(cards, pred_single_high_card, selected_mask) && selected_mask == hold_mask) return "single_high_card";
+    if (mask_is_high_pair(cards, hold_mask)) return "high_pair";
+
+    return "best_expected_value_hold";
+}
 
 uint32_t rule_auto_hold(const std::array<Card*, 5>& cards) {
     for (uint8_t i = 0; i < 5; i++) {
@@ -1234,13 +1365,62 @@ uint32_t AutoHold::auto_hold(const std::array<Card*, 5>& cards, uint32_t bet, Ga
     return solver_auto_hold(cards, bet, variant, out_ev);
 }
 
+AutoHold::HoldExplanation AutoHold::explain_hold(const std::array<Card*, 5>& cards, uint32_t hold_mask) {
+    const std::string category = explanation_category_for_mask(cards, static_cast<uint8_t>(hold_mask & 31u));
+    const ExplanationTemplate templ = explanation_template_for_category(category.c_str());
+    return HoldExplanation{
+        category,
+        templ.headline,
+        templ.summary,
+        templ.pattern_tip
+    };
+}
+
 std::string AutoHold::explain_hold_label(const std::array<Card*, 5>& cards, uint32_t hold_mask) {
-    return rule_style_label_for_mask(cards, static_cast<uint8_t>(hold_mask & 31u));
+    return explain_hold(cards, hold_mask).headline;
 }
 
 std::string AutoHold::explain_hold_summary(const std::array<Card*, 5>& cards, uint32_t hold_mask) {
-    const std::string label = explain_hold_label(cards, hold_mask);
-    return explanation_summary_for_label(label);
+    return explain_hold(cards, hold_mask).summary;
+}
+
+std::string AutoHold::classify_mistake_severity(double ev_delta, bool exact_match) {
+    if (exact_match || ev_delta <= 1e-9) {
+        return "perfect";
+    }
+    if (ev_delta <= kMistakeThresholds.very_close_max) {
+        return "very_close";
+    }
+    if (ev_delta <= kMistakeThresholds.small_leak_max) {
+        return "small_leak";
+    }
+    if (ev_delta <= kMistakeThresholds.moderate_max) {
+        return "moderate";
+    }
+    return "major";
+}
+
+bool AutoHold::analyze_player_hold(const std::array<Card*, 5>& cards, uint32_t bet, GameVariant variant, uint32_t player_mask, MistakeAnalysis& out_analysis) {
+    uint32_t best_mask = 0;
+    double best_ev = 0.0;
+    uint32_t second_mask = 0;
+    double second_ev = 0.0;
+    if (!solver_top_two(cards, bet, variant, best_mask, best_ev, second_mask, second_ev)) {
+        return false;
+    }
+
+    const uint32_t normalized_player_mask = player_mask & 31u;
+    const double player_ev = (normalized_player_mask == best_mask)
+        ? best_ev
+        : expected_value_for_mask(cards, bet, variant, normalized_player_mask);
+    const double ev_delta = std::max(0.0, best_ev - player_ev);
+
+    out_analysis.best_mask = best_mask;
+    out_analysis.best_ev = best_ev;
+    out_analysis.player_ev = player_ev;
+    out_analysis.ev_delta = ev_delta;
+    out_analysis.severity = classify_mistake_severity(ev_delta, normalized_player_mask == best_mask);
+    return true;
 }
 
 bool AutoHold::solver_top_two(const std::array<Card*, 5>& cards, uint32_t bet, GameVariant variant, uint32_t& best_mask, double& best_ev, uint32_t& second_mask, double& second_ev) {
