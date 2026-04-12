@@ -1,5 +1,14 @@
 # Equilibrium
 
+![C++](https://img.shields.io/badge/C%2B%2B-17-blue)
+![Python](https://img.shields.io/badge/Python-3.x-yellow)
+![FastAPI](https://img.shields.io/badge/API-FastAPI-green)
+![Docker](https://img.shields.io/badge/Container-Docker-blue)
+![iOS](https://img.shields.io/badge/iOS-SwiftUI-black)
+![Android](https://img.shields.io/badge/Android-Kotlin-brightgreen)
+![Solver](https://img.shields.io/badge/Strategy-EV%20Solver-orange)
+![ML](https://img.shields.io/badge/MachineLearning-MLP-purple)
+
 Equilibrium is a multi-platform video poker trainer and analysis suite built around a shared C++ core. It currently supports two Jacks or Better paytables, exposes solver, rule, and ML engines in the CLI/core, ships solver-backed mobile trainer apps for Android and iOS, and includes FastAPI interfaces for strategy, evaluation, and deterministic coaching.
 
 ## Current Features
