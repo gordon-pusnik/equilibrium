@@ -1,6 +1,6 @@
 # Equilibrium Video Poker Suite
 
-Equilibrium is a shared-core video poker project built around a C++17 engine that powers command-line tools, a FastAPI service, Android and iOS trainer apps, and an ML training pipeline.
+Equilibrium is a shared-core video poker project built around a C++17 engine that powers command-line tools, a FastAPI service, Android and iOS trainer apps, a deterministic coaching backend, and an ML training pipeline.
 
 ## What It Supports
 
@@ -22,7 +22,7 @@ Equilibrium is a shared-core video poker project built around a C++17 engine tha
 - `poker-core/python`
   - ML model training from solver-generated JSONL data
 - `api-server`
-  - FastAPI endpoints for strategy lookup and hand evaluation
+  - FastAPI endpoints for strategy lookup, hand evaluation, and deterministic coaching
 - `android-app`
   - Kotlin + Jetpack Compose + JNI
 - `ios-app`
@@ -32,11 +32,11 @@ Equilibrium is a shared-core video poker project built around a C++17 engine tha
 
 - Variant selection in both mobile apps
 - Variant-specific RTP display and paytable display
-- Solver, rule, and ML engine switching
-- Post-deal engine switching to compare suggested holds on the same hand
-- Explanation panel for suggested holds
-- Solver-only EV detail output in the expanded explanation view
-- Variant-specific bundled ML models in Android and iOS
+- Solver-backed trainer flow in both mobile apps
+- Deterministic coaching explanation panel for suggested holds
+- Solver EV detail output in the expanded explanation view
+- Mistake severity feedback for player-selected holds
+- Premium coaching API endpoints for compare, session summaries, and drill recommendations
 
 ## CLI Summary
 
@@ -66,7 +66,7 @@ Run ML:
 
 ## API Summary
 
-Strategy endpoint:
+Strategy/evaluate endpoints:
 
 ```json
 {
@@ -85,11 +85,13 @@ ML requests additionally require:
 }
 ```
 
+Coaching endpoints now exist under `/v1/coach`:
+- `/v1/coach/compare`
+- `/v1/coach/session-summary`
+- `/v1/coach/drill-recommendation`
+
+They are deterministic, solver-backed, and return structured labels, EV comparisons, leak categories, and drill recommendations.
+
 ## Mobile Summary
 
-Android and iOS both use the same core logic and now bundle separate ML models per variant:
-
-- `jacks_or_better_9_6` -> `modeljob96.json`
-- `jacks_or_better_8_5` -> `modeljob85.json`
-
-The ML engine is currently useful for comparison and experimentation, but it still trails the rule and solver engines in RTP.
+Android and iOS both use the same shared core, but the current trainer UI is solver-backed rather than exposing engine switching. The ML engine and variant-specific models remain in the repo for CLI evaluation, experimentation, and future product work, but they still trail the rule and solver engines in RTP.
