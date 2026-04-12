@@ -21,6 +21,8 @@
 		AA0000000000000000001012 /* modeljob96.json in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002023 /* modeljob96.json */; };
 		AA0000000000000000001013 /* game_variant.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002024 /* game_variant.cpp */; };
 		AA0000000000000000001014 /* modeljob85.json in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002026 /* modeljob85.json */; };
+		AA0000000000000000001015 /* help.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002027 /* help.png */; };
+		AA0000000000000000001016 /* settings.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002028 /* settings.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -50,6 +52,8 @@
 		AA0000000000000000002024 /* game_variant.cpp */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.objcpp; fileEncoding = 4; name = game_variant.cpp; path = "../poker-core/c++/game_variant.cpp"; sourceTree = SOURCE_ROOT; };
 		AA0000000000000000002025 /* game_variant.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = game_variant.h; path = "../poker-core/c++/game_variant.h"; sourceTree = SOURCE_ROOT; };
 		AA0000000000000000002026 /* modeljob85.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = modeljob85.json; sourceTree = "<group>"; };
+		AA0000000000000000002027 /* help.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = help.png; sourceTree = "<group>"; };
+		AA0000000000000000002028 /* settings.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = settings.png; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -108,6 +112,8 @@
 				AA0000000000000000002006 /* cards */,
 				AA0000000000000000002023 /* modeljob96.json */,
 				AA0000000000000000002026 /* modeljob85.json */,
+				AA0000000000000000002027 /* help.png */,
+				AA0000000000000000002028 /* settings.png */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -201,6 +207,8 @@
 				AA0000000000000000001011 /* cards in Resources */,
 				AA0000000000000000001012 /* modeljob96.json in Resources */,
 				AA0000000000000000001014 /* modeljob85.json in Resources */,
+				AA0000000000000000001015 /* help.png in Resources */,
+				AA0000000000000000001016 /* settings.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

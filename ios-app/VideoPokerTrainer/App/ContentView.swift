@@ -16,6 +16,18 @@ struct GameVariantUi: Identifiable {
     let isPremium: Bool
 }
 
+private enum AppSheet: Identifiable {
+    case help
+    case settings
+
+    var id: String {
+        switch self {
+        case .help: return "help"
+        case .settings: return "settings"
+        }
+    }
+}
+
 struct ContentView: View {
     @State private var selectedVariantId: String = "jacks_or_better_9_6"
     @State private var bet: Int = 5
@@ -36,6 +48,10 @@ struct ContentView: View {
     @State private var solverNextEV: Double? = nil
     @State private var canDraw: Bool = false
     @State private var autoHoldEnabled: Bool = true
+    @State private var autoShowExplanation: Bool = false
+    @State private var showPaytable: Bool = false
+    @State private var activeSheet: AppSheet?
+    @State private var settingsMessage: String?
 
     private let bridge = PokerEngineBridge(seed: UInt64(Date().timeIntervalSince1970 * 1000))
     private let gameVariants: [GameVariantUi] = [
@@ -45,184 +61,226 @@ struct ContentView: View {
     private var selectedVariant: GameVariantUi {
         gameVariants.first(where: { $0.id == selectedVariantId }) ?? gameVariants[0]
     }
+    private var appVersionText: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        return "\(version) (\(build))"
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                Text("Video Poker Trainer")
-                    .font(.title2.weight(.bold))
-                    .multilineTextAlignment(.center)
-
+        NavigationStack {
+            ScrollView {
                 VStack(spacing: 8) {
-                    Picker("Game", selection: $selectedVariantId) {
-                        ForEach(gameVariants) { variant in
-                            Text(variant.name).tag(variant.id)
-                        }
-                    }
-                    .pickerStyle(.menu)
-
-                    Text("Expected RTP (optimal play): \(selectedVariant.rtpText)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-
-                    VStack(spacing: 4) {
-                        Text("Paytable (\(bet) coin\(bet == 1 ? "" : "s"))")
-                            .font(.subheadline.weight(.semibold))
-
-                        ForEach(paytableEntries(for: selectedVariantId, bet: bet), id: \.name) { entry in
-                            HStack {
-                                Text(entry.name)
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Text("\(entry.payout)")
-                                    .fontWeight(.semibold)
-                            }
-                            .font(.caption)
-                        }
-                    }
-                    .padding(12)
-                    .frame(maxWidth: 320)
-                    .background(Color(.secondarySystemBackground))
-                    .cornerRadius(12)
-                }
-
-                //Spacer()
-
-                HStack(spacing: 20) {
-                    HStack {
-                        Text("Bet: \(bet)")
-                            .font(.headline)
-                        Stepper("", value: $bet, in: 1...5)
-                            .labelsHidden()
-                    }
-                    
-                    Divider().frame(height: 24)
-                    
-                    HStack {
-                        Toggle("Autohold", isOn: $autoHoldEnabled)
-                            .labelsHidden()
-                        Text("Best Hold")
-                            .font(.body)
-                    }
-                }
-                
-                Spacer()
- 
-                HStack(spacing: 16) {
-                    Button("Deal") {
-                        dealSuggested()
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    Button("Draw") {
-                        drawSelected()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!canDraw)
-                }
-
-                if !errorText.isEmpty {
-                    Text(errorText)
-                        .foregroundColor(.red)
-                        .multilineTextAlignment(.center)
-                }
-
-                Spacer()
-                
-                VStack(spacing: 14) {
                     VStack(spacing: 8) {
-                        Text("Initial (tap to toggle holds)")
-                            .font(.subheadline.weight(.semibold))
-                        CardRow(
-                            cards: initialCards, 
-                            interactive: canDraw, 
-                            suggestedMask: autoHoldEnabled ? suggestedMask : nil
-                        ) { idx in
-                            if canDraw {
-                                initialCards[idx].held.toggle()
-                                updateMistakeAnalysis(cards: initialCards)
+                        Picker("Game", selection: $selectedVariantId) {
+                            ForEach(gameVariants) { variant in
+                                Text(variant.name).tag(variant.id)
                             }
+                        }
+                        .pickerStyle(.menu)
+
+                        Text("Expected RTP (optimal play): \(selectedVariant.rtpText)")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+
+                        VStack(spacing: 6) {
+                            Button(showPaytable ? "Hide Paytable" : "Show Paytable") {
+                                showPaytable.toggle()
+                            }
+                            .font(.caption.weight(.medium))
+
+                            if showPaytable {
+                                VStack(spacing: 4) {
+                                    Text("Paytable (\(bet) coin\(bet == 1 ? "" : "s"))")
+                                        .font(.subheadline.weight(.semibold))
+
+                                    ForEach(paytableEntries(for: selectedVariantId, bet: bet), id: \.name) { entry in
+                                        HStack {
+                                            Text(entry.name)
+                                                .foregroundColor(.secondary)
+                                            Spacer()
+                                            Text("\(entry.payout)")
+                                                .fontWeight(.semibold)
+                                        }
+                                        .font(.caption)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(12)
+                        .frame(maxWidth: 320)
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
+                    }
+
+                    HStack(spacing: 14) {
+                        HStack {
+                            Text("Bet: \(bet)")
+                                .font(.headline)
+                            Stepper("", value: $bet, in: 1...5)
+                                .labelsHidden()
+                        }
+
+                        Divider().frame(height: 24)
+
+                        HStack {
+                            Text("Show Best Hold")
+                                .font(.body)
+                            Toggle("Autohold", isOn: $autoHoldEnabled)
+                                .labelsHidden()
                         }
                     }
 
-                    if !explanationLabel.isEmpty && !initialCards.isEmpty {
-                        VStack(spacing: 10) {
-                            Button(showExplanationDetails ? "Hide Details" : "Details") {
-                                showExplanationDetails.toggle()
+                    HStack(spacing: 16) {
+                        Button("Deal") {
+                            dealSuggested()
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("Draw") {
+                            drawSelected()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!canDraw)
+                    }
+
+                    if !errorText.isEmpty {
+                        Text(errorText)
+                            .foregroundColor(.red)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    VStack(spacing: 14) {
+                        VStack(spacing: 8) {
+                            Text("Dealt Hand (tap to hold or discard)")
+                                .font(.subheadline.weight(.semibold))
+                            CardRow(
+                                cards: initialCards,
+                                interactive: canDraw,
+                                suggestedMask: autoHoldEnabled ? suggestedMask : nil
+                            ) { idx in
+                                if canDraw {
+                                    initialCards[idx].held.toggle()
+                                    updateMistakeAnalysis(cards: initialCards)
+                                }
                             }
-                            .font(.caption)
-                            
-                            if showExplanationDetails {
-                                Text("Best Hold: \(explanationLabel)")
-                                    .font(.subheadline.weight(.medium))
-                                    .multilineTextAlignment(.center)
-                                
-                                VStack(spacing: 8) {
-                                    Text(explanationSummary)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
+                        }
+
+                        if !explanationLabel.isEmpty && !initialCards.isEmpty {
+                            VStack(spacing: 10) {
+                                Button(showExplanationDetails ? "Hide Strategy Explanation" : "Strategy Explanation") {
+                                    showExplanationDetails.toggle()
+                                }
+                                .font(.caption)
+
+                                if showExplanationDetails {
+                                    Text("Best Hold: \(explanationLabel)")
+                                        .font(.subheadline.weight(.medium))
                                         .multilineTextAlignment(.center)
 
-                                    if !explanationPatternTip.isEmpty {
-                                        Text("Pattern tip: \(explanationPatternTip)")
+                                    VStack(spacing: 8) {
+                                        Text(explanationSummary)
                                             .font(.caption)
                                             .foregroundColor(.secondary)
                                             .multilineTextAlignment(.center)
-                                    }
 
-                                    if !mistakeSeverity.isEmpty, let evDelta = mistakeEvDelta {
-                                        Text("Current choice: \(severityDisplayText(mistakeSeverity))")
-                                            .font(.caption)
-                                            .foregroundColor(severityColor(mistakeSeverity))
-                                            .multilineTextAlignment(.center)
+                                        if !explanationPatternTip.isEmpty {
+                                            Text("Pattern tip: \(explanationPatternTip)")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                                .multilineTextAlignment(.center)
+                                        }
 
-                                        Text("EV loss vs solver: \(String(format: "%.2f", evDelta))")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                            .multilineTextAlignment(.center)
-                                    }
-                                    
-                                    if let bestEV = solverBestEV,
-                                       let nextEV = solverNextEV,
-                                       !solverNextBest.isEmpty {
-                                        VStack(spacing: 0) {
-                                            Text("Best EV: \(String(format: "%.2f", bestEV))")
+                                        if !mistakeSeverity.isEmpty, let evDelta = mistakeEvDelta {
+                                            Text("Current choice: \(severityDisplayText(mistakeSeverity))")
+                                                .font(.caption)
+                                                .foregroundColor(severityColor(mistakeSeverity))
+                                                .multilineTextAlignment(.center)
+
+                                            Text("EV loss vs solver: \(String(format: "%.2f", evDelta))")
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
                                                 .multilineTextAlignment(.center)
-                                            
-                                            Text("Next best: Hold \(solverNextBest) - EV \(String(format: "%.2f", nextEV))")
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                                .multilineTextAlignment(.center)
-                                            
-                                            Text("EV edge: +\(String(format: "%.2f", bestEV - nextEV))")
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                                .multilineTextAlignment(.center)
+                                        }
+
+                                        if let bestEV = solverBestEV,
+                                           let nextEV = solverNextEV,
+                                           !solverNextBest.isEmpty {
+                                            VStack(spacing: 0) {
+                                                Text("Best EV: \(String(format: "%.2f", bestEV))")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                                    .multilineTextAlignment(.center)
+
+                                                Text("Next best: Hold \(solverNextBest) - EV \(String(format: "%.2f", nextEV))")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                                    .multilineTextAlignment(.center)
+
+                                                Text("EV edge: +\(String(format: "%.2f", bestEV - nextEV))")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                                    .multilineTextAlignment(.center)
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+
+                        VStack(spacing: 8) {
+                            Text("Final Hand")
+                                .font(.subheadline.weight(.semibold))
+                            CardRow(cards: finalCards, interactive: false, suggestedMask: nil) { _ in }
+                        }
                     }
-                    
-                    VStack(spacing: 8) {
-                        Text("Final")
-                            .font(.subheadline.weight(.semibold))
-                        CardRow(cards: finalCards, interactive: false, suggestedMask: nil) { _ in }
+
+                    Text("Payout: \(payout)")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(payout > 0 ? .green : .secondary)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        activeSheet = .help
+                    } label: {
+                        toolbarImageButton(named: "help", accessibilityLabel: "Help")
                     }
                 }
-                
-                Text("Payout: \(payout)")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundColor(payout > 0 ? .green : .secondary)
-
-                Spacer()
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        activeSheet = .settings
+                    } label: {
+                        toolbarImageButton(named: "settings", accessibilityLabel: "Settings")
+                    }
+                }
             }
-            .padding()
-            .frame(maxWidth: .infinity)
+        }
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .help:
+                HelpView()
+            case .settings:
+                SettingsView(
+                    autoShowExplanation: $autoShowExplanation,
+                    appVersionText: appVersionText,
+                    onPlaceholderAction: { settingsMessage = $0 }
+                )
+            }
+        }
+        .alert("Not Available Yet", isPresented: Binding(
+            get: { settingsMessage != nil },
+            set: { if !$0 { settingsMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {
+                settingsMessage = nil
+            }
+        } message: {
+            Text(settingsMessage ?? "")
         }
         .onChange(of: autoHoldEnabled) { _ in
             refreshSuggestedHolds()
@@ -304,7 +362,7 @@ struct ContentView: View {
         explanationPatternTip = explanation.patternTip
         updateMistakeAnalysis(cards: initialCards)
         updateSolverAnalysis(cards: initialCards)
-        showExplanationDetails = false
+        showExplanationDetails = autoShowExplanation
         finalCards = []
     }
 
@@ -518,6 +576,129 @@ struct ContentView: View {
         default: return "?"
         }
     }
+
+    @ViewBuilder
+    private func toolbarImageButton(named imageName: String, accessibilityLabel: String) -> some View {
+        if let path = Bundle.main.path(forResource: imageName, ofType: "png"),
+           let image = UIImage(contentsOfFile: path) {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(height: 22)
+                .accessibilityLabel(accessibilityLabel)
+        } else {
+            Text(accessibilityLabel)
+        }
+    }
+}
+
+private struct HelpView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HelpSectionView(
+                        title: "How the trainer works",
+                        detail: "Deal a hand, choose which cards to hold, then draw. The trainer compares your choice to the solver-backed best play."
+                    )
+                    HelpSectionView(
+                        title: "Holding and discarding",
+                        detail: "Turn off Show Best Hold if you want to choose cards yourself. Tap dealt cards to hold or release them before drawing."
+                    )
+                    HelpSectionView(
+                        title: "Show Best Hold",
+                        detail: "When this is on, the trainer marks the solver-recommended hold for the current hand."
+                    )
+                    HelpSectionView(
+                        title: "Mistake levels",
+                        detail: "Perfect means you matched the best play. Very close means the EV loss was tiny. Small, moderate, and major mistakes mean you gave up more value versus the solver."
+                    )
+                    HelpSectionView(
+                        title: "What EV means",
+                        detail: "EV stands for expected value. It is the average return of a play over many repetitions, not a guarantee for one hand."
+                    )
+                    HelpSectionView(
+                        title: "Free variants",
+                        detail: "9/6 and 8/5 describe the full house and flush payouts. 9/6 returns more under optimal play than 8/5."
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+            }
+            .navigationTitle("Help / How to Play")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct SettingsView: View {
+    @Binding var autoShowExplanation: Bool
+    let appVersionText: String
+    let onPlaceholderAction: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Trainer") {
+                    Toggle("Auto-show strategy explanation", isOn: $autoShowExplanation)
+                }
+
+                Section("Feedback") {
+                    Text("Sound and haptics are not supported in the current MVP.")
+                        .foregroundColor(.secondary)
+                }
+
+                Section("About") {
+                    Button("Restore Purchases") {
+                        onPlaceholderAction("Purchase restore is reserved for future premium content and is not active in this MVP.")
+                    }
+                    Button("Privacy Policy") {
+                        onPlaceholderAction("A dedicated privacy policy link has not been added to the app yet.")
+                    }
+                    Button("Terms") {
+                        onPlaceholderAction("A dedicated terms link has not been added to the app yet.")
+                    }
+                    HStack {
+                        Text("App Version")
+                        Spacer()
+                        Text(appVersionText)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Settings / About")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct HelpSectionView: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(detail)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
 }
 
 private struct PaytableEntry: Identifiable {
@@ -561,7 +742,7 @@ struct CardRow: View {
                     if card.held && !card.winning {
                         Color.black.opacity(0.15)
                             .cornerRadius(8)
-                        
+
                         VStack {
                             Spacer()
                             Text("HELD")
