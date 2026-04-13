@@ -1,6 +1,10 @@
 package com.example.videopoker
 
 import android.os.Bundle
+import android.view.HapticFeedbackConstants
+import android.view.View
+import android.media.AudioAttributes
+import android.media.SoundPool
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
@@ -48,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -59,6 +64,72 @@ data class GameVariantUi(val id: String, val name: String, val rtpText: String, 
 private enum class AppSheet {
     HELP,
     SETTINGS
+}
+
+private enum class TrainerHapticEvent {
+    CardHoldToggled,
+    DealPerformed,
+    DrawPerformed,
+    WinResultShown
+}
+
+private enum class TrainerSoundEvent {
+    CardHoldToggled,
+    DealPerformed,
+    DrawPerformed,
+    WinResultShown
+}
+
+private class TrainerHaptics(private val view: View) {
+    fun perform(event: TrainerHapticEvent, enabled: Boolean) {
+        if (!enabled) {
+            return
+        }
+        val feedbackConstant = when (event) {
+            TrainerHapticEvent.CardHoldToggled -> HapticFeedbackConstants.KEYBOARD_TAP
+            TrainerHapticEvent.DealPerformed -> HapticFeedbackConstants.CONTEXT_CLICK
+            TrainerHapticEvent.DrawPerformed -> HapticFeedbackConstants.CONTEXT_CLICK
+            TrainerHapticEvent.WinResultShown -> HapticFeedbackConstants.CONFIRM
+        }
+        view.performHapticFeedback(feedbackConstant)
+    }
+}
+
+private class TrainerSounds(context: android.content.Context) {
+    private val soundPool = SoundPool.Builder()
+        .setMaxStreams(2)
+        .setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+        )
+        .build()
+    private val soundIds = mapOf(
+        TrainerSoundEvent.CardHoldToggled to soundPool.load(context, R.raw.sfx_card_tap, 1),
+        TrainerSoundEvent.DealPerformed to soundPool.load(context, R.raw.sfx_deal, 1),
+        TrainerSoundEvent.DrawPerformed to soundPool.load(context, R.raw.sfx_draw, 1),
+        TrainerSoundEvent.WinResultShown to soundPool.load(context, R.raw.sfx_win_chime, 1)
+    )
+    private val activeStreams = mutableMapOf<TrainerSoundEvent, Int>()
+
+    fun play(event: TrainerSoundEvent, enabled: Boolean) {
+        if (!enabled) {
+            return
+        }
+        activeStreams.remove(event)?.let { existingStreamId ->
+            soundPool.stop(existingStreamId)
+        }
+        val soundId = soundIds[event] ?: return
+        val streamId = soundPool.play(soundId, 0.35f, 0.35f, 1, 0, 1.0f)
+        if (streamId != 0) {
+            activeStreams[event] = streamId
+        }
+    }
+
+    fun release() {
+        soundPool.release()
+    }
 }
 
 class MainActivity : ComponentActivity() {
@@ -88,10 +159,20 @@ private fun AppScreen() {
     var canDraw by remember { mutableStateOf(false) }
     var autoHoldEnabled by remember { mutableStateOf(true) }
     var autoShowExplanation by remember { mutableStateOf(false) }
+    var soundEnabled by remember { mutableStateOf(true) }
+    var hapticsEnabled by remember { mutableStateOf(true) }
     var showPaytable by remember { mutableStateOf(false) }
     var activeSheet by remember { mutableStateOf<AppSheet?>(null) }
     var settingsMessage by remember { mutableStateOf("") }
     val context = LocalContext.current
+    val currentView = LocalView.current
+    val trainerHaptics = remember(currentView) { TrainerHaptics(currentView) }
+    val trainerSounds = remember(context) { TrainerSounds(context) }
+    DisposableEffect(trainerSounds) {
+        onDispose {
+            trainerSounds.release()
+        }
+    }
     val appVersionText = remember(context) {
         try {
             val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
@@ -331,6 +412,8 @@ private fun AppScreen() {
                         solverNextBest = solverAnalysis?.let { formatHeldCards(initialCards, it.secondMask) }.orEmpty()
                         showExplanationDetails = autoShowExplanation
                         canDraw = true
+                        trainerSounds.play(TrainerSoundEvent.DealPerformed, soundEnabled)
+                        trainerHaptics.perform(TrainerHapticEvent.DealPerformed, hapticsEnabled)
                     }) { Text("Deal") }
 
                     Button(
@@ -363,6 +446,14 @@ private fun AppScreen() {
                             solverNextBest = ""
                             showExplanationDetails = false
                             canDraw = false
+                            trainerSounds.play(TrainerSoundEvent.DrawPerformed, soundEnabled)
+                            trainerHaptics.perform(TrainerHapticEvent.DrawPerformed, hapticsEnabled)
+                            if (payout > 0) {
+                                currentView.postDelayed({
+                                    trainerSounds.play(TrainerSoundEvent.WinResultShown, soundEnabled)
+                                    trainerHaptics.perform(TrainerHapticEvent.WinResultShown, hapticsEnabled)
+                                }, 150L)
+                            }
                         },
                         enabled = canDraw
                     ) { Text("Draw") }
@@ -388,6 +479,8 @@ private fun AppScreen() {
                         if (canDraw) {
                             val card = initialCards[idx]
                             initialCards[idx] = card.copy(held = !card.held)
+                            trainerSounds.play(TrainerSoundEvent.CardHoldToggled, soundEnabled)
+                            trainerHaptics.perform(TrainerHapticEvent.CardHoldToggled, hapticsEnabled)
                             val mistakeAnalysis = analyzePlayerHold(handle, initialCards, bet)
                             mistakeSeverity = mistakeAnalysis?.severity.orEmpty()
                             mistakeEvDelta = mistakeAnalysis?.evDelta
@@ -496,6 +589,10 @@ private fun AppScreen() {
                     SettingsScreenContent(
                         autoShowExplanation = autoShowExplanation,
                         onAutoShowExplanationChange = { autoShowExplanation = it },
+                        soundEnabled = soundEnabled,
+                        onSoundEnabledChange = { soundEnabled = it },
+                        hapticsEnabled = hapticsEnabled,
+                        onHapticsEnabledChange = { hapticsEnabled = it },
                         appVersion = appVersionText,
                         onPlaceholderAction = { settingsMessage = it }
                     )
@@ -581,6 +678,10 @@ private fun HelpScreenContent() {
 private fun SettingsScreenContent(
     autoShowExplanation: Boolean,
     onAutoShowExplanationChange: (Boolean) -> Unit,
+    soundEnabled: Boolean,
+    onSoundEnabledChange: (Boolean) -> Unit,
+    hapticsEnabled: Boolean,
+    onHapticsEnabledChange: (Boolean) -> Unit,
     appVersion: String,
     onPlaceholderAction: (String) -> Unit
 ) {
@@ -590,9 +691,15 @@ private fun SettingsScreenContent(
             checked = autoShowExplanation,
             onCheckedChange = onAutoShowExplanationChange
         )
-        HelpSection(
-            title = "Sound and haptics",
-            body = "Sound and haptic controls are not supported in the current MVP."
+        SettingsToggleRow(
+            label = "Sound",
+            checked = soundEnabled,
+            onCheckedChange = onSoundEnabledChange
+        )
+        SettingsToggleRow(
+            label = "Haptics",
+            checked = hapticsEnabled,
+            onCheckedChange = onHapticsEnabledChange
         )
         SettingsActionRow("Restore Purchases") {
             onPlaceholderAction("Purchase restore is reserved for future premium content and is not active in this MVP.")
