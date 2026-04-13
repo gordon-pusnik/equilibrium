@@ -23,6 +23,10 @@
 		AA0000000000000000001014 /* modeljob85.json in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002026 /* modeljob85.json */; };
 		AA0000000000000000001015 /* help.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002027 /* help.png */; };
 		AA0000000000000000001016 /* settings.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002028 /* settings.png */; };
+		AA0000000000000000001017 /* sfx_card_tap.wav in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002029 /* sfx_card_tap.wav */; };
+		AA0000000000000000001018 /* sfx_deal.wav in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002030 /* sfx_deal.wav */; };
+		AA0000000000000000001019 /* sfx_draw.wav in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002031 /* sfx_draw.wav */; };
+		AA0000000000000000001020 /* sfx_win_chime.wav in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000002032 /* sfx_win_chime.wav */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -54,6 +58,10 @@
 		AA0000000000000000002026 /* modeljob85.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = modeljob85.json; sourceTree = "<group>"; };
 		AA0000000000000000002027 /* help.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = help.png; sourceTree = "<group>"; };
 		AA0000000000000000002028 /* settings.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = settings.png; sourceTree = "<group>"; };
+		AA0000000000000000002029 /* sfx_card_tap.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = sfx_card_tap.wav; sourceTree = "<group>"; };
+		AA0000000000000000002030 /* sfx_deal.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = sfx_deal.wav; sourceTree = "<group>"; };
+		AA0000000000000000002031 /* sfx_draw.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = sfx_draw.wav; sourceTree = "<group>"; };
+		AA0000000000000000002032 /* sfx_win_chime.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = sfx_win_chime.wav; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -114,6 +122,10 @@
 				AA0000000000000000002026 /* modeljob85.json */,
 				AA0000000000000000002027 /* help.png */,
 				AA0000000000000000002028 /* settings.png */,
+				AA0000000000000000002029 /* sfx_card_tap.wav */,
+				AA0000000000000000002030 /* sfx_deal.wav */,
+				AA0000000000000000002031 /* sfx_draw.wav */,
+				AA0000000000000000002032 /* sfx_win_chime.wav */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -209,6 +221,10 @@
 				AA0000000000000000001014 /* modeljob85.json in Resources */,
 				AA0000000000000000001015 /* help.png in Resources */,
 				AA0000000000000000001016 /* settings.png in Resources */,
+				AA0000000000000000001017 /* sfx_card_tap.wav in Resources */,
+				AA0000000000000000001018 /* sfx_deal.wav in Resources */,
+				AA0000000000000000001019 /* sfx_draw.wav in Resources */,
+				AA0000000000000000001020 /* sfx_win_chime.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
