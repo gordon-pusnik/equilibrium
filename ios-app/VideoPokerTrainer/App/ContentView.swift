@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UIKit
 
@@ -28,6 +29,76 @@ private enum AppSheet: Identifiable {
     }
 }
 
+private enum TrainerHapticEvent {
+    case cardHoldToggled
+    case dealPerformed
+    case drawPerformed
+    case winResultShown
+}
+
+private enum TrainerSoundEvent {
+    case cardHoldToggled
+    case dealPerformed
+    case drawPerformed
+    case winResultShown
+}
+
+private final class TrainerHaptics {
+    private let selectionGenerator = UISelectionFeedbackGenerator()
+    private let impactGenerator = UIImpactFeedbackGenerator(style: .light)
+    private let successGenerator = UINotificationFeedbackGenerator()
+
+    func perform(_ event: TrainerHapticEvent, enabled: Bool) {
+        guard enabled else {
+            return
+        }
+
+        switch event {
+        case .cardHoldToggled:
+            selectionGenerator.prepare()
+            selectionGenerator.selectionChanged()
+        case .dealPerformed, .drawPerformed:
+            impactGenerator.prepare()
+            impactGenerator.impactOccurred(intensity: 0.75)
+        case .winResultShown:
+            successGenerator.prepare()
+            successGenerator.notificationOccurred(.success)
+        }
+    }
+}
+
+private final class TrainerSounds {
+    private let players: [TrainerSoundEvent: AVAudioPlayer]
+
+    init() {
+        var loadedPlayers: [TrainerSoundEvent: AVAudioPlayer] = [:]
+        let soundFiles: [(TrainerSoundEvent, String)] = [
+            (.cardHoldToggled, "sfx_card_tap"),
+            (.dealPerformed, "sfx_deal"),
+            (.drawPerformed, "sfx_draw"),
+            (.winResultShown, "sfx_win_chime")
+        ]
+        for (event, resourceName) in soundFiles {
+            guard let url = Bundle.main.url(forResource: resourceName, withExtension: "wav"),
+                  let player = try? AVAudioPlayer(contentsOf: url) else {
+                continue
+            }
+            player.volume = 0.35
+            player.prepareToPlay()
+            loadedPlayers[event] = player
+        }
+        players = loadedPlayers
+    }
+
+    func play(_ event: TrainerSoundEvent, enabled: Bool) {
+        guard enabled, let player = players[event] else {
+            return
+        }
+        player.currentTime = 0
+        player.play()
+    }
+}
+
 struct ContentView: View {
     @State private var selectedVariantId: String = "jacks_or_better_9_6"
     @State private var bet: Int = 5
@@ -49,11 +120,15 @@ struct ContentView: View {
     @State private var canDraw: Bool = false
     @State private var autoHoldEnabled: Bool = true
     @State private var autoShowExplanation: Bool = false
+    @State private var soundEnabled: Bool = true
+    @State private var hapticsEnabled: Bool = true
     @State private var showPaytable: Bool = false
     @State private var activeSheet: AppSheet?
     @State private var settingsMessage: String?
 
     private let bridge = PokerEngineBridge(seed: UInt64(Date().timeIntervalSince1970 * 1000))
+    private let haptics = TrainerHaptics()
+    private let sounds = TrainerSounds()
     private let gameVariants: [GameVariantUi] = [
         GameVariantUi(id: "jacks_or_better_9_6", name: "Jacks or Better 9/6", rtpText: "99.54%", isPremium: false),
         GameVariantUi(id: "jacks_or_better_8_5", name: "Jacks or Better 8/5", rtpText: "97.30%", isPremium: false)
@@ -162,6 +237,8 @@ struct ContentView: View {
                             ) { idx in
                                 if canDraw {
                                     initialCards[idx].held.toggle()
+                                    sounds.play(.cardHoldToggled, enabled: soundEnabled)
+                                    haptics.perform(.cardHoldToggled, enabled: hapticsEnabled)
                                     updateMistakeAnalysis(cards: initialCards)
                                 }
                             }
@@ -267,6 +344,8 @@ struct ContentView: View {
             case .settings:
                 SettingsView(
                     autoShowExplanation: $autoShowExplanation,
+                    soundEnabled: $soundEnabled,
+                    hapticsEnabled: $hapticsEnabled,
                     appVersionText: appVersionText,
                     onPlaceholderAction: { settingsMessage = $0 }
                 )
@@ -364,6 +443,8 @@ struct ContentView: View {
         updateSolverAnalysis(cards: initialCards)
         showExplanationDetails = autoShowExplanation
         finalCards = []
+        sounds.play(.dealPerformed, enabled: soundEnabled)
+        haptics.perform(.dealPerformed, enabled: hapticsEnabled)
     }
 
     private func drawSelected() {
@@ -412,6 +493,14 @@ struct ContentView: View {
                 held: ($0["held"] as? Int ?? 0) == 1,
                 winning: ($0["winning"] as? Int ?? 0) == 1
             )
+        }
+        sounds.play(.drawPerformed, enabled: soundEnabled)
+        haptics.perform(.drawPerformed, enabled: hapticsEnabled)
+        if payout > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                sounds.play(.winResultShown, enabled: soundEnabled)
+                haptics.perform(.winResultShown, enabled: hapticsEnabled)
+            }
         }
     }
 
@@ -640,6 +729,8 @@ private struct HelpView: View {
 
 private struct SettingsView: View {
     @Binding var autoShowExplanation: Bool
+    @Binding var soundEnabled: Bool
+    @Binding var hapticsEnabled: Bool
     let appVersionText: String
     let onPlaceholderAction: (String) -> Void
 
@@ -653,8 +744,8 @@ private struct SettingsView: View {
                 }
 
                 Section("Feedback") {
-                    Text("Sound and haptics are not supported in the current MVP.")
-                        .foregroundColor(.secondary)
+                    Toggle("Sound", isOn: $soundEnabled)
+                    Toggle("Haptics", isOn: $hapticsEnabled)
                 }
 
                 Section("About") {
