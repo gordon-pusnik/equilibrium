@@ -13,7 +13,7 @@ namespace VideoPokerApp
     // --- API Models ---
     public class StrategyRequest
     {
-        [JsonPropertyName("variant")] public string Variant { get; set; } = "jacks_or_better";
+        [JsonPropertyName("variant")] public string Variant { get; set; } = "jacks_or_better_9_6";
         [JsonPropertyName("hand")] public List<string> Hand { get; set; } = new();
         [JsonPropertyName("bet")] public int Bet { get; set; } = 5;
         [JsonPropertyName("engine")] public string Engine { get; set; } = "solver";
@@ -48,7 +48,7 @@ namespace VideoPokerApp
         private Button strategyButton;
         private Button evaluateButton;
         private static readonly HttpClient client = new HttpClient();
-        private const string BaseUrl = "http://localhost:8000";
+        private const string BaseUrl = "http://192.168.250.111:8001";
 
         public MainForm()
         {
