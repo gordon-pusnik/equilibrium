@@ -188,9 +188,9 @@ bash ./build_docker.sh
 
 Default URLs:
 
-- `http://localhost:8000/`
-- `http://localhost:8000/docs`
-- `http://localhost:8000/openapi.json`
+- `http://localhost:8001/`
+- `http://localhost:8001/docs`
+- `http://localhost:8001/openapi.json`
 
 ### `POST /v1/video-poker/strategy`
 
