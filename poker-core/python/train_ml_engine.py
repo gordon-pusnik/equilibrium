@@ -172,6 +172,8 @@ def permute_sample(x, target, rng):
 
     if len(x) > 260:
         x_perm[260] = x[260]
+    if len(x) > 261:
+        x_perm[261:] = x[261:]
 
     target_perm = [0.0] * 5
     for new_pos, old_pos in enumerate(perm):
