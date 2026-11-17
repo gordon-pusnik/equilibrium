@@ -57,11 +57,11 @@ Relevant implementation files:
 - `poker-core/c++/autohold.cpp`: solver, rule engine, JSON model loading and ML inference.
 - `poker-core/c++/verify_rtp.cpp`: engine return evaluation for a selected variant.
 
-Note: `poker-core/python/autohold.py` is an unreferenced legacy prototype (using an older 261-feature / 32-output model format) and is not part of the active `videopoker-ml-v3` training and native C++ inference pipeline.
+Note: `poker-core/python/autohold.py` is a legacy prototype reachable only through the parallel Python CLI (`poker-core/python/main.py`, `hand.py` and `verify_rtp.py` import it). It is not referenced by the C++ core or by the shipped mobile apps, and it is not part of the active `videopoker-ml-v3` training and native C++ inference pipeline. It encodes only 261 features (five positional 52-card one-hots plus bet) and predicts a single hold mask by taking the argmax of its output layer, so it is incompatible with the current per-card five-logit model. Do not extend it for new work.
 
 ## 3. Experimental Neural Network and Training
 
-The Python trainer defaults to two hidden layers of 64 and 32 units. Hidden-layer sizes are configurable; they are not fixed requirements for every exported model. The native loader also supports legacy models with one hidden layer.
+The Python trainer defaults to two hidden layers of 64 and 32 units. Hidden-layer sizes are configurable; they are not fixed requirements for every exported model. The shipped models use 128 and 64 units, while `ml/modelv1.json` is an older single-hidden-layer model.
 
 ```mermaid
 flowchart TD
@@ -101,9 +101,29 @@ There is no variant/paytable input feature. Training data and model evaluation m
 
 The current trainer exports `videopoker-ml-v3` JSON with dimensions, weights and biases. C++ loads those values in `autohold.cpp`. For the five-output model, it constructs a hold mask by holding each card whose logit is greater than zero, equivalent to a sigmoid probability greater than 0.5. Native inference does not need to calculate sigmoid values to apply that threshold.
 
+`set_ml_model` accepts two shapes:
+
+- `videopoker-ml-v3`: `input_size`, `hidden1_size`, `hidden2_size`, `output_size`, `W1/b1/W2/b2/W3/b3`. Used by `ml/modeljob96.json`, `ml/modeljob85.json`, `ml/modelv2.json` and `ml/modelv3.json`.
+- Legacy single hidden layer: `input_size`, `hidden_size`, `output_size`, `W1/b1/W2/b2`. Used by `ml/modelv1.json` (`videopoker-ml-v2`).
+
+The hold decision is keyed on `output_size`, not on format. When `output_size` is 5, inference uses the per-card rule described below. When it is not 5 — the older 32-output mask-classifier shape — inference instead takes the argmax output index and uses it directly as a 0–31 mask. A five-output model in the legacy single-hidden-layer shape still uses the per-card threshold path. Legacy 261-feature inputs are tolerated: the encoder fills only the positional card vectors and the bet, leaving the hand-summary features at zero.
+
 > **Clarification:** The C++ hold decision uses a hard `logit > 0` threshold rather than computing sigmoid probabilities. This is mathematically equivalent to `sigmoid(logit) > 0.5` because $\sigma(0) = 0.5$ and sigmoid is strictly monotonic; evaluating `logit > 0` in native C++ avoids `std::exp` and division while producing identical hold masks. Furthermore, threshold tuning does not require computing sigmoid: any desired probability threshold $p \in (0, 1)$ translates directly to a constant logit-space threshold $T = \ln(p / (1 - p))$, allowing inference to simply evaluate `logit > T`. Computing sigmoid probabilities explicitly is only required when floating-point confidence scores in $[0, 1]$ are directly needed (e.g., for user-facing UI or coaching explanations, which should also apply temperature scaling if calibrated probabilities are required).
 
 Model accuracy and RTP must be measured for the intended variant before making quality claims.
+
+### Reference measurements
+
+Reproduce the current state with:
+
+```bash
+bash ./build.sh
+./build/verify_rtp --engine ml --ml-model ml/modeljob96.json --variant jacks_or_better_9_6 200000 3 5 12345
+```
+
+Observed: 93.72% RTP (95% CI 92.78–94.67%) against the solver's 99.54% theoretical return, so the current ML engine gives up roughly 5.8 percentage points. Exact-mask agreement with the exported labels, measured on the first 2,000 rows of each source dataset: `modeljob96` 90.4% (97.4% per bit), `modeljob85` 90.2% (97.1% per bit), `modelv3` 94.9% (98.5% per bit). These are in-sample figures against training rows, not held-out validation results.
+
+Dataset provenance is uneven: `ml/trainingjob85.jsonl` and `ml/trainingjob96.jsonl` carry both `engine` and `variant`, while `ml/training1.jsonl` and `ml/training2.jsonl` carry `engine` but no `variant`, so models trained on them cannot be traced to a paytable from the data itself.
 
 ## 4. Current Integration and MVP Boundaries
 
@@ -114,9 +134,141 @@ Model accuracy and RTP must be measured for the intended variant before making q
 | iOS | `ContentView.swift` explicitly selects `solver`; Objective-C++ calls the shared trainer API | Preserve solver-only decisions and shared native logic |
 | FastAPI coaching | `api-server/app/native.py` selects `solver` for its solver handles; coaching services derive deterministic output from native facts | Coaching remains secondary and cannot override holds |
 | FastAPI strategy | `/v1/video-poker/strategy` defaults to solver but currently accepts `rule` and `ml` | Solver-only MVP service enforcement remains a separate implementation task |
+| C# desktop client | `csharp-app/Program.cs` posts to `/v1/video-poker/strategy` with `engine` defaulting to `solver` and an optional `model_path` | Inherits the same strategy-route enforcement gap as FastAPI |
 
 Engine selection is currently global in `autohold.cpp`, even when accessed through trainer handles. A solver handle does not establish per-handle engine isolation. Service enforcement and concurrent engine use require explicit review rather than assuming request-local isolation.
+
+ML artefacts are present in the repository but are not activated in the MVP decision path: `ml/modeljob96.json` and `ml/modeljob85.json` are bundled as Android assets and iOS resources, `api-server/Dockerfile` copies them into the API container, and the Android `nativeSetMlModel` and iOS `loadMlModel` bridge functions are never called by app code. Bundling a model is not the same as using it.
 
 There is no established performance guarantee here for mobile frame rate, inference latency or solver responsiveness. Native integration alone does not prove smooth 60fps gameplay; performance must be measured on target devices.
 
 These are source observations and product constraints, not confirmation that builds, runtime parity or MVP acceptance checks have passed. ML research, new variants and premium expansion do not displace solver correctness or the solver-only MVP boundary.
+
+## 5. Solver-backed ML EV-regret benchmark
+
+The benchmark measures the expected return lost by the existing native ML policy on
+initial hands. It does not retrain models or change MVP decisions. The Python driver
+handles sampling, exclusions, provenance and JSON output; `build/benchmark_ml` is its
+sequential C++ scoring worker. Scoring calls native ML inference followed by
+`AutoHold::analyze_player_hold`, so both the best hold and the model-selected hold
+are valued by the shared exhaustive solver. No replacement cards are sampled.
+Do not use the ML branch's `auto_hold(..., out_ev)` for this measurement: that
+branch currently writes zero to `out_ev`.
+
+Build and run a small pilot before increasing the sample size:
+
+```bash
+bash ./build.sh
+python3 -B -m unittest discover -s poker-core/tests -v
+python3 -B poker-core/python/benchmark_ml.py \
+  --ml-model ml/modeljob96.json --variant jacks_or_better_9_6 \
+  --bet 5 --hands 100 --seed 12345 --output build/benchmark-job96-100.json
+```
+
+Use `--hands 1000` for the next baseline, and select `ml/modeljob85.json` with
+`--variant jacks_or_better_8_5` to measure the other shipped model. The driver
+requires an explicit variant: models do not carry verified paytable provenance.
+It accepts the exported nested-array models with 261 or 286 inputs and 5 or 32
+outputs, validating dimensions and finite float32-compatible weights before scoring.
+
+For each hand, normalized regret is:
+
+```text
+(solver_best_ev - model_hold_ev) / bet
+```
+
+EVs are expected returned coins, including the stake in paying outcomes, rather
+than net profit. `100 * mean_normalized_regret` is the expected RTP gap in
+**percentage points** for the evaluated hand distribution. The report also includes:
+
+- exact-mask agreement and EV-optimal agreement, the latter accepting a normalized
+  regret of at most `1e-9` so equally valuable alternative holds are not mistakes;
+- the mean regret's sample standard error and an approximate normal 95% interval
+  (`null` for a single hand), without clipping the interval at zero;
+- mean solver and model expected returns on the same sampled initial hands;
+- native initial-hand categories, with frequencies, mean regrets and contributions
+  to total regret, plus the worst 20 mistakes exceeding the tolerance;
+- every ordered initial hand, both masks and EVs, variant, bet, seed, model SHA-256,
+  driver SHA-256, native binary SHA-256, benchmark version and scoring time.
+
+Sampling is uniform over ordered five-card deals, with replacement between hands.
+The interval describes sampling uncertainty over initial-hand regrets, not draw
+outcomes. Small samples can miss rare severe mistakes; even an all-zero sample does
+not establish zero population loss. The sampled solver mean is not the theoretical
+full-deck RTP, and the report does not subtract regret from a theoretical constant
+or claim that a small run establishes near-solver performance.
+
+### Training exclusions and replay
+
+Exclude known training hands with repeatable `--exclude-training` arguments:
+
+```bash
+python3 -B poker-core/python/benchmark_ml.py \
+  --ml-model ml/modeljob96.json --variant jacks_or_better_9_6 \
+  --bet 5 --hands 1000 --seed 12345 \
+  --exclude-training ml/trainingjob96.jsonl \
+  --output build/benchmark-job96-excluded.json
+```
+
+Exclusions read the `initial` cards from each JSONL row and reject equivalent hands
+under both card reordering and any global suit renaming. They apply regardless of
+the training row's bet or variant. Accepted hands remain uniform **conditional on
+not belonging to excluded classes**; their mean regret is not an unconditional
+full-deck RTP gap. The report records exclusion file hashes, row counts, unique
+excluded classes and the number of rejected proposals. Provenance remains
+unverified beyond the supplied files: exclusions alone do not prove a complete
+held-out evaluation for a model with unknown training history.
+
+Replay a prior report's exact ordered hands when comparing models:
+
+```bash
+python3 -B poker-core/python/benchmark_ml.py \
+  --ml-model ml/modeljob96.json --variant jacks_or_better_9_6 \
+  --bet 5 --input build/benchmark-job96-100.json \
+  --output build/benchmark-job96-replay.json
+```
+
+`--input` and `--hands` are mutually exclusive. Replay requires the same variant and
+bet, rejects hands matching any explicitly supplied exclusions, and records the
+source report's hash. It does not inherit training exclusions or establish that
+the supplied hands were randomly sampled. The stored hands, rather than the seed
+alone, are the durable basis for comparisons across Python versions. Timing and
+provenance fields can differ between runs; scores and summaries for identical
+hands, model, variant and bet should reproduce.
+
+### Initial baseline: 2026-11-12
+
+Both shipped paytable models were evaluated at bet 5 on the **same 1,000 uniformly
+sampled ordered hands**, seed `12345`, with no training exclusions. These are
+population-sampling diagnostics with possible training overlap, not verified
+held-out results. The 100-hand 9/6 pilot took approximately 3.8 seconds; each
+1,000-hand baseline took approximately 38 seconds on the review machine.
+
+| Model | Mean EV gap (percentage points) | Approximate 95% interval for gap | EV-optimal agreement |
+| --- | ---: | ---: | ---: |
+| `modeljob96` | 5.2018 | 3.7833–6.6204 | 90.7% |
+| `modeljob85` | 3.6065 | 2.5641–4.6488 | 90.4% |
+
+Exact-mask agreement equalled EV-optimal agreement in these two samples. Initial
+high-card hands accounted for 3.9523 and 2.7000 percentage points of the respective
+total gaps. These broad categories do not identify individual missed draw patterns.
+The worst sampled mistake for both models was holding all of `5h 7h 6h 5s 3h`,
+which pays zero, instead of the solver's four-heart hold (`mask 23`, discarding
+`5s`). Its normalized EV loss was 2.3404 for 9/6 and 2.1702 for 8/5.
+
+Model SHA-256 fingerprints for these measurements:
+
+- `modeljob96`: `08887de13c2429825d8455b5258f27a3cb13fbcc5edec416d2c63d3ffaf9ffe3`
+- `modeljob85`: `075ceebb028c8afcfdaa76c4bcfdc89b0d148929f6caa00b675ae94c22bce789`
+
+Reproduce the baseline with the pilot command above using `--hands 1000` and the
+matching model/variant. Reports were written to `build/benchmark-job96-1000.json`
+and `build/benchmark-job85-1000.json`; generated reports under `build/` are ignored
+by Git. Each contains the complete ordered hands for replay. Native binary hashes
+can differ after rebuilding with another compiler or platform.
+
+A separate 100-hand smoke run successfully loaded all 100,000 rows from
+`ml/trainingjob96.jsonl`, excluded their equivalent hand classes and scored the
+remaining sample. That smoke run validates the exclusion path; it is not a
+held-out performance conclusion. Larger representative samples and verified
+training provenance remain necessary before evaluating a near-solver target.

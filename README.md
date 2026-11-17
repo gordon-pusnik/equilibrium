@@ -66,7 +66,7 @@ flowchart TD
 ## Repository Layout
 
 - `poker-core/c++`: core engine, solver, rule engine, ML inference, trainer API
-- `poker-core/python`: ML training script
+- `poker-core/python`: ML training script (`train_ml_engine.py`) plus a legacy Python engine prototype (`autohold.py`, `main.py`, `verify_rtp.py`) that is not used by the C++ core or the mobile apps
 - `ml`: trained JSON models such as `modeljob96.json` and `modeljob85.json`
 - `api-server`: FastAPI app and Dockerfile
 - `android-app`: Android Studio project
@@ -86,6 +86,7 @@ This produces:
 
 - `build/videopoker`
 - `build/verify_rtp`
+- `build/benchmark_ml` (native scoring worker for the Python EV-regret benchmark)
 
 ## CLI
 
@@ -108,7 +109,7 @@ Notes:
 - `solver` is the default engine
 - `jacks_or_better_9_6` is the default variant
 - `--ml-model` is required when `--engine ml`
-- `--dump-training` writes solver-generated JSONL rows for ML training
+- `--dump-training` writes JSONL rows using the holds of the selected engine; use `--engine solver` for authoritative training labels
 
 Examples:
 
@@ -175,6 +176,21 @@ The mobile apps currently bundle variant-specific ML models:
 - `ml/modeljob85.json` for `jacks_or_better_8_5`
 
 The current mobile trainer UI is solver-backed and does not expose engine switching.
+
+Measure expected return lost against the solver, without sampling replacement draws:
+
+```bash
+python3 -B poker-core/python/benchmark_ml.py \
+  --ml-model ml/modeljob96.json --variant jacks_or_better_9_6 \
+  --bet 5 --hands 100 --seed 12345 --output build/benchmark-job96.json
+```
+
+The JSON report includes normalized EV regret, the RTP gap in percentage points,
+agreement, worst mistakes, initial-hand categories and replayable ordered hands.
+Start with a small pilot: exact solver scoring is more expensive than ML-only
+simulation. See [ML architecture](docs/ml_architecture.md#5-solver-backed-ml-ev-regret-benchmark)
+for exclusions, replay, baseline results and statistical limitations, and
+[verification](docs/verification.md#ml-ev-regret-benchmark) for the focused tests.
 
 ## API
 
