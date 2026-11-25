@@ -395,3 +395,30 @@ the final candidate. For identical inputs and configuration in the same runtime,
 reruns in separate output directories reproduce the metrics and model bytes.
 The original positional CLI, `train_ml_engine.py input.jsonl output.json`, is
 available for experiments that use its internal row split.
+
+## 8. Checkpoint selection and paired EV comparison
+
+Save one ordered validation cohort in benchmark replay format and use it for
+every shortlisted checkpoint and the shipped baseline. Preserve the cohort,
+benchmark reports, source partition hash, and sampling settings. Select the
+checkpoint with the smallest mean normalized EV regret. Use exact-mask and
+bit accuracy as diagnostics.
+
+Run each model through `benchmark_ml.py --input` on the same cohort, then
+compare the resulting reports:
+
+```bash
+python3 -B poker-core/python/compare_ml_benchmarks.py \
+  --baseline build/ml-step4-job96/shipped.json \
+  --candidate build/ml-step4-job96/epoch-018.json \
+  --output build/ml-step4-job96/paired-comparison.json
+```
+
+The comparison requires matching variant, bet, ordered deals, initial
+categories, and solver EVs. Positive improvement means the candidate
+reduced regret. Category contributions sum to the overall improvement,
+and the report identifies the hands with the largest increases in regret.
+The approximate 95% interval uses the standard error of paired hand
+differences. Validation results are for selection and can be optimistic after
+choosing a checkpoint on the same cohort. Reserve the final test cohort for
+evaluating the selected checkpoint against the shipped model.
