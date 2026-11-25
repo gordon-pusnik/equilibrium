@@ -61,13 +61,15 @@ Note: `poker-core/python/autohold.py` is a legacy prototype reachable only throu
 
 ## 3. Experimental Neural Network and Training
 
-The Python trainer defaults to two hidden layers of 64 and 32 units. Hidden-layer sizes are configurable; they are not fixed requirements for every exported model. The shipped models use 128 and 64 units, while `ml/modelv1.json` is an older single-hidden-layer model.
+Manifest training defaults to two hidden layers of 128 and 64 units, matching
+the shipped models. The legacy positional CLI defaults to 64 and 32 units.
+Both modes accept custom layer sizes. The older `ml/modelv1.json` has a single hidden layer.
 
 ```mermaid
 flowchart TD
     X["286 input features"]
-    H1["Hidden layer 1: 64 ReLU units by default"]
-    H2["Hidden layer 2: 32 ReLU units by default"]
+    H1["Hidden layer 1: 128 ReLU units in manifest mode"]
+    H2["Hidden layer 2: 64 ReLU units in manifest mode"]
     O["5 output logits, one per card position"]
 
     X --> H1
@@ -91,7 +93,7 @@ There is no variant/paytable input feature. Training data and model evaluation m
 
 ### Training behavior
 
-- **Targets:** five hold bits from each JSONL `hold_mask`. The loader does not enforce that labels came from the solver or filter rows by variant; dataset provenance must be checked separately.
+- **Targets:** five hold bits from each JSONL `hold_mask`. Manifest mode requires solver provenance and matching variant and bet on every row. The legacy positional CLI relies on the caller to check provenance.
 - **Loss:** binary cross-entropy, using sigmoid probabilities derived from the five logits. These are independent card-hold predictions, not probabilities over all 32 holds or a guarantee of EV-optimal play.
 - **Optimizer:** per-sample stochastic gradient descent with manual backpropagation and L2 terms in weight updates.
 - **Learning rate:** for one-based epoch `e`, `lr_e = lr_initial × 0.98^(e − 1)`.
@@ -189,7 +191,7 @@ than net profit. `100 * mean_normalized_regret` is the expected RTP gap in
 - native initial-hand categories, with frequencies, mean regrets and contributions
   to total regret, plus the worst 20 mistakes exceeding the tolerance;
 - every ordered initial hand, both masks and EVs, variant, bet, seed, model SHA-256,
-  driver SHA-256, native binary SHA-256, benchmark version and scoring time.
+  driver and shared-helper SHA-256, native binary SHA-256, benchmark version and scoring time.
 
 Sampling is uniform over ordered five-card deals, with replacement between hands.
 The interval describes sampling uncertainty over initial-hand regrets, not draw
@@ -272,3 +274,124 @@ A separate 100-hand smoke run successfully loaded all 100,000 rows from
 remaining sample. That smoke run validates the exclusion path; it is not a
 held-out performance conclusion. Larger representative samples and verified
 training provenance remain necessary before evaluating a near-solver target.
+
+## 6. Reproducible dataset preparation
+
+`poker-core/python/ml_data.py` owns card validation, the hand-equivalence key,
+file hashing and uniform sampling shared by the benchmark and
+`poker-core/python/prepare_ml_data.py`. Prepare 9/6 first:
+
+```bash
+python3 -B poker-core/python/prepare_ml_data.py ml/trainingjob96.jsonl \
+  --variant jacks_or_better_9_6 --bet 5 \
+  --test-hands 10000 --test-seed 12345 --split-seed 23456 \
+  --validation-fraction 0.1 --output-dir build/ml-data-job96
+```
+
+For 8/5 use `ml/trainingjob85.jsonl`, `--variant jacks_or_better_8_5` and a new
+output directory. Multiple positional JSONL sources are supported. Every
+nonblank row in every source must be an object with explicit `engine: solver`,
+the requested `variant`, an integer matching `bet` (1–5), five distinct valid
+`initial` cards, and an integer `hold_mask` (0–31). Booleans and coerced strings
+are rejected for integer fields. Optional `final` cards and nonnegative integer
+`payout` fields are also checked. Malformed rows fail with the source path and
+physical line number, even when they would later be excluded. Files missing
+provenance, including `training1.jsonl` and `training2.jsonl`, are rejected.
+This validates declared solver provenance; it does not recompute label optimality.
+
+Preparation proceeds in this fixed order:
+
+1. Sample the final test cohort uniformly over ordered five-card deals, with
+   replacement between hands and no source-dependent exclusions. Repeated hands
+   and repeated equivalence classes are retained to preserve that distribution.
+2. Validate all sources and remove every row equivalent to any test hand.
+3. Sort the remaining unique equivalence keys, shuffle them using the independent
+   split seed, and assign a prefix to validation. Its group count is the floor of
+   `validation_fraction * remaining_groups`, clamped to keep both splits nonempty.
+   At least two non-test groups are required. All other groups go to training.
+
+Keys are sorted four-suit rank-bitsets, invariant under card order and any global
+suit renaming. Group assignment never rewrites cards or masks. Duplicate rows
+and distinct ordered examples from the same group stay together; source order
+is retained within each output. The validation fraction applies to **groups**,
+so its row fraction can differ when groups have unequal numbers of examples.
+
+The new output directory contains:
+
+- `train.jsonl` and `validation.jsonl`: original source rows byte-for-byte, with
+  a terminating newline added if absent. Blank source lines are omitted.
+- `test.json`: ordered, unlabelled test hands with variant and bet, compatible
+  with benchmark `--input`. Labels and EVs come from native solver scoring at
+  final evaluation; test-equivalent source labels are excluded from both splits.
+- `manifest.json`: version, variant/bet, both seeds, sampling/splitting algorithms,
+  Python version, preparation/helper code hashes, ordered absolute source paths,
+  source-byte hashes and row counts. Each partition records its relative path,
+  SHA-256, row count, group count and sorted group keys. Train and validation
+  membership lists map each output row to a zero-based source index and one-based
+  physical source line. Removed test-equivalent source rows have the same membership
+  and count records under `excluded_test_equivalent`. Ordered test membership is
+  stored in `test.json`, bound to the manifest by its hash.
+
+Existing output directories are rejected to protect fixed experiments. Identical
+source bytes, source order, configuration and code in the same Python runtime
+produce byte-identical artifacts, including the manifest, in a new directory.
+The stored hands and membership are durable across runtimes; do not rely on seeds
+alone for reproducing a cohort after changing Python versions. Generated artifacts
+under `build/` are ignored by Git; retain the complete directory for an experiment.
+The test reservation guarantees disjointness for newly prepared training and
+validation data. It makes no held-out claim about a shipped model's training history.
+
+Run the preparation tests without a native build:
+
+```bash
+python3 -B -m unittest discover -s poker-core/tests -p 'test_prepare_ml_data.py' -v
+```
+
+The full suite after `bash ./build.sh` also checks the shared key against all
+120 card orders and 24 suit renamings of a repeated-rank hand and verifies native
+benchmark behavior.
+
+## 7. Manifest-driven training
+
+Start with a short seeded run on the 9/6 partitions:
+
+```bash
+python3 -B poker-core/python/train_ml_engine.py \
+  --manifest build/ml-data-job96/manifest.json \
+  --validation-data build/ml-data-job96/validation.jsonl \
+  --run-dir build/ml-smoke-job96 --seed 12345 --epochs 2 \
+  --max-samples 128 --max-validation-samples 32
+```
+
+Both labelled partition paths default to the locations in the manifest.
+`--validation-data` can point to a copy of the fixed validation file. The
+trainer verifies both complete files against the manifest SHA-256 hashes, row
+counts and group keys, and checks disjointness using the recorded test keys.
+The ordered test cohort can be stored separately since fitting reads only the
+labelled partitions. Source hashes are carried over from preparation.
+
+The trainer uses the supplied validation rows for epoch metrics and shuffles
+the training rows each epoch for SGD. It rejects `--validation-split` in this
+mode. The sample limits select ordered prefixes for small runs. Omit them to
+train and validate on the complete fixed partitions. The defaults are 286
+inputs, 128 and 64 hidden units, five output logits, 20 epochs, a learning rate
+of 0.01, L2 of `1e-6` and seed 12345. The optimizer, loss, learning rate decay
+and augmentation are described in section 3.
+
+Each new run directory contains these files:
+
+- `checkpoints/epoch-NNN.json` holds the native inference model at that epoch.
+- `candidate-jacks_or_better_9_6.json` is a separate copy of the final epoch
+  checkpoint. Keep the epoch files for later candidate selection by validation
+  EV regret. For 8/5, the candidate filename uses that variant ID.
+- `run.json` records runtime and trainer/helper code hashes, the manifest and
+  dataset hashes, rows available and used, effective configuration and seed,
+  metrics for each completed epoch, and model hashes. Loss is the mean per-hand
+  sum of five binary cross-entropy terms. Exact mask and bit agreement are
+  classification diagnostics.
+
+The record is updated after each saved checkpoint. The completed record identifies
+the final candidate. For identical inputs and configuration in the same runtime,
+reruns in separate output directories reproduce the metrics and model bytes.
+The original positional CLI, `train_ml_engine.py input.jsonl output.json`, is
+available for experiments that use its internal row split.

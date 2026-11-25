@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DRIVER = ROOT / "poker-core/python/benchmark_ml.py"
 NATIVE = ROOT / "build/benchmark_ml"
 FIXTURE = ROOT / "poker-core/tests/fixtures/benchmark_hands.json"
+sys.path.insert(0, str(DRIVER.parent))
 spec = importlib.util.spec_from_file_location("benchmark_ml", DRIVER)
 bench = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bench)
@@ -159,6 +160,7 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(a["summary"], b["summary"])
         self.assertEqual(a["model"]["sha256"], bench.sha256(self.model))
         self.assertEqual(a["native_sha256"], bench.sha256(NATIVE))
+        self.assertEqual(a["helpers_sha256"], bench.sha256(bench.ml_data.__file__))
         self.assertEqual(a["evaluation_scope"], "replayed_hands")
         self.assertIsNone(a["sampling"]["seed"])
         for arguments in (["--hands", "0"], ["--bet", "6"], ["--variant", "invalid"],

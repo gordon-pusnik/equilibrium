@@ -1,56 +1,19 @@
 """Measure native ML hold quality using exact shared-solver expected payouts."""
 import argparse
-import hashlib
 import json
 import math
 from pathlib import Path
-import random
 import statistics
 import subprocess
 import sys
 import time
 
+import ml_data
+from ml_data import VARIANTS, hand_ids, hand_key, initial_cards, sample_hands, sha256
+
 VERSION = "1"
 ROOT = Path(__file__).resolve().parents[2]
-VARIANTS = ("jacks_or_better_9_6", "jacks_or_better_8_5")
-# Sorted suit rank-bitsets canonically represent a hand under card reordering
-# and suit renaming, including cases with several cards of the same rank.
 OPTIMAL_TOLERANCE = 1e-9  # Normalized EV: expected returned coins / wagered coin.
-
-
-def sha256(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def hand_ids(initial):
-    if not isinstance(initial, list) or len(initial) != 5:
-        raise ValueError("Each initial hand must contain five cards")
-    ids = []
-    for card in initial:
-        if not isinstance(card, dict):
-            raise ValueError("Cards must be objects with integer s and r fields")
-        s, r = card.get("s"), card.get("r")
-        if type(s) is not int or type(r) is not int or not 1 <= s <= 4 or not 2 <= r <= 14:
-            raise ValueError("Cards require integer suit 1..4 and rank 2..14")
-        ids.append((s - 1) * 13 + r - 2)
-    if len(set(ids)) != 5:
-        raise ValueError("Duplicate cards in hand")
-    return ids
-
-
-def initial_cards(ids):
-    return [{"s": card // 13 + 1, "r": card % 13 + 2} for card in ids]
-
-
-def hand_key(ids):
-    suits = [0] * 4
-    for card in ids:
-        suits[card // 13] |= 1 << (card % 13)
-    return tuple(sorted(suits))
 
 
 def load_exclusions(paths):
@@ -117,22 +80,6 @@ def validate_model(path):
         vector("b1", hidden)
         matrix("W2", outputs, hidden)
         vector("b2", outputs)
-
-
-def sample_hands(count, seed, exclusions):
-    rng = random.Random(seed)
-    hands, rejected = [], 0
-    # Sampling with replacement preserves the uniform dealt-hand distribution.
-    # Conditioning only on exclusions avoids bias from deduplicating accepted hands.
-    for _ in range(max(10000, count * 100)):
-        ids = rng.sample(range(52), 5)
-        if hand_key(ids) in exclusions:
-            rejected += 1
-            continue
-        hands.append(ids)
-        if len(hands) == count:
-            return hands, rejected
-    raise ValueError("Unable to sample enough hands; exclusions may cover most hand classes")
 
 
 def load_replay(path, variant, bet, exclusions):
@@ -254,6 +201,7 @@ def main(argv=None):
         elapsed = time.perf_counter() - started
         report = {
             "benchmark_version": VERSION, "driver_sha256": sha256(__file__),
+            "helpers_sha256": sha256(ml_data.__file__),
             "native_sha256": sha256(args.native),
             "model": {"path": str(args.ml_model), "sha256": sha256(args.ml_model)},
             "variant": args.variant, "bet": args.bet,

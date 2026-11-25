@@ -151,22 +151,49 @@ Generate solver training data:
   --engine solver \
   --variant jacks_or_better_9_6 \
   --dump-training training96.jsonl \
-  1000000 1 100000
+  1000000 5 100000
 ```
 
-Train a model:
+Prepare reproducible, leakage-free partitions from explicitly scoped solver data:
 
 ```bash
-python3 poker-core/python/train_ml_engine.py training96.jsonl model96.json
+python3 -B poker-core/python/prepare_ml_data.py ml/trainingjob96.jsonl \
+  --variant jacks_or_better_9_6 --bet 5 \
+  --test-hands 10000 --test-seed 12345 --split-seed 23456 \
+  --validation-fraction 0.1 --output-dir build/ml-data-job96
 ```
 
-Evaluate the trained model:
+This reserves uniform test deals before excluding their equivalents from the
+sources, then splits the remaining hand-equivalence groups into train/validation.
+Outputs include unchanged labelled rows, replayable test hands and a manifest.
+Use a new output directory for each run. Repeat with `trainingjob85.jsonl` and
+`jacks_or_better_8_5` for 8/5. See the
+[partition contract](docs/ml_architecture.md#6-reproducible-dataset-preparation)
+for provenance, membership and reproducibility details.
+
+Train a small candidate on deterministic prefixes of the fixed partitions:
+
+```bash
+python3 -B poker-core/python/train_ml_engine.py \
+  --manifest build/ml-data-job96/manifest.json \
+  --validation-data build/ml-data-job96/validation.jsonl \
+  --run-dir build/ml-smoke-job96 --seed 12345 --epochs 2 \
+  --max-samples 128 --max-validation-samples 32
+```
+
+The run directory contains a model checkpoint per epoch, a final epoch
+candidate, and `run.json` with configuration, hashes and training metrics. The
+manifest supplies the validation path by default. See
+[manifest-driven training](docs/ml_architecture.md#7-manifest-driven-training)
+for the full configuration and output contract.
+
+To simulate return for the smoke model:
 
 ```bash
 ./build/verify_rtp \
   --engine ml \
   --variant jacks_or_better_9_6 \
-  --ml-model model96.json \
+  --ml-model build/ml-smoke-job96/candidate-jacks_or_better_9_6.json \
   100000 3 5 12345
 ```
 

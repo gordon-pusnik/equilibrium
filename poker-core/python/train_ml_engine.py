@@ -1,7 +1,14 @@
 import argparse
+import hashlib
 import json
 import math
+from pathlib import Path
+import platform
 import random
+import shutil
+
+import ml_data
+from ml_data import VARIANTS, hand_key, sha256, validate_training_row
 
 
 def encode_hand(initial, bet):
@@ -58,6 +65,70 @@ def load_dataset(path, max_samples=None):
         raise ValueError("No training samples found in input file.")
 
     return X, y
+
+
+def load_fixed_partition(path, partition, variant, bet, limit):
+    X, y, keys = [], [], set()
+    digest = hashlib.sha256()
+    count = 0
+    with path.open("rb") as stream:
+        for number, raw in enumerate(stream, 1):
+            digest.update(raw)
+            if not raw.strip():
+                continue
+            try:
+                row = json.loads(raw.decode("utf-8"))
+                keys.add(hand_key(validate_training_row(row, variant, bet)))
+            except ValueError as error:
+                raise ValueError(f"{path}:{number}: invalid partition row: {error}") from error
+            count += 1
+            if limit is None or count <= limit:
+                X.append(encode_hand(row["initial"], bet))
+                y.append(encode_target(row["hold_mask"]))
+    if digest.hexdigest() != partition["sha256"]:
+        raise ValueError(f"{path}: SHA-256 does not match the manifest")
+    if (not count or count != partition["rows"] or len(keys) != partition["groups"] or
+            [list(key) for key in sorted(keys)] != partition["keys"]):
+        raise ValueError(f"{path}: row counts or hand groups do not match the manifest")
+    return (X, y), keys
+
+
+def load_fixed_data(manifest_path, validation_path, train_limit, validation_limit):
+    raw_manifest = manifest_path.read_bytes()
+    manifest = json.loads(raw_manifest)
+    if (not isinstance(manifest, dict) or type(manifest.get("manifest_version")) is not int or
+            manifest["manifest_version"] != 1):
+        raise ValueError("Expected a version 1 preparation manifest")
+    variant, bet = manifest["variant"], manifest["bet"]
+    if variant not in VARIANTS or type(bet) is not int or not 1 <= bet <= 5:
+        raise ValueError("Invalid manifest variant or bet")
+    partitions = manifest["partitions"]
+    train_path = manifest_path.parent / partitions["train"]["path"]
+    if validation_path is None:
+        validation_path = manifest_path.parent / partitions["validation"]["path"]
+    datasets, data_records = {}, {}
+    # The manifest supplies test keys for the leakage check. Training only reads
+    # the two labelled files, so it can run with the test cohort stored separately.
+    test = partitions["test"]
+    seen = {tuple(key) for key in test["keys"]}
+    if not seen or len(seen) != test["groups"]:
+        raise ValueError("Invalid test group counts in the manifest")
+    for name, path, limit in (("train", train_path, train_limit),
+                              ("validation", validation_path, validation_limit)):
+        partition = partitions[name]
+        dataset, keys = load_fixed_partition(path, partition, variant, bet, limit)
+        if seen & keys:
+            raise ValueError(f"{name}: hand-equivalence groups overlap another partition")
+        seen.update(keys)
+        datasets[name] = dataset
+        data_records[name] = {"path": str(path.resolve()), "sha256": partition["sha256"],
+                              "partition_rows": partition["rows"], "used_rows": len(dataset[0])}
+    provenance = {
+        "manifest": {"path": str(manifest_path.resolve()),
+                     "sha256": hashlib.sha256(raw_manifest).hexdigest()},
+        "variant": variant, "bet": bet, "sources": manifest["sources"], "partitions": data_records,
+    }
+    return datasets["train"], datasets["validation"], provenance
 
 
 def relu(v):
@@ -192,6 +263,9 @@ def train(
     seed=12345,
     validation_split=0.1,
     l2=1e-6,
+    *,
+    validation_data=None,
+    on_epoch=None,
 ):
     rng = random.Random(seed)
 
@@ -205,22 +279,26 @@ def train(
     W3 = [[(rng.random() * 2.0 - 1.0) * math.sqrt(2.0 / hidden2) for _ in range(hidden2)] for _ in range(k)]
     b3 = [0.0 for _ in range(k)]
 
-    indices = list(range(len(X)))
-    rng.shuffle(indices)
+    if validation_data is None:
+        indices = list(range(len(X)))
+        rng.shuffle(indices)
 
-    val_size = int(len(indices) * validation_split)
-    if validation_split > 0.0 and val_size == 0 and len(indices) > 1:
-        val_size = 1
-    if val_size >= len(indices):
-        val_size = max(0, len(indices) - 1)
+        val_size = int(len(indices) * validation_split)
+        if validation_split > 0.0 and val_size == 0 and len(indices) > 1:
+            val_size = 1
+        if val_size >= len(indices):
+            val_size = max(0, len(indices) - 1)
 
-    val_indices = indices[:val_size]
-    train_indices = indices[val_size:]
+        val_indices = indices[:val_size]
+        train_indices = indices[val_size:]
 
-    X_train = [X[i] for i in train_indices]
-    y_train = [y[i] for i in train_indices]
-    X_val = [X[i] for i in val_indices]
-    y_val = [y[i] for i in val_indices]
+        X_train = [X[i] for i in train_indices]
+        y_train = [y[i] for i in train_indices]
+        X_val = [X[i] for i in val_indices]
+        y_val = [y[i] for i in val_indices]
+    else:
+        X_train, y_train = X, y
+        X_val, y_val = validation_data
 
     n = len(X_train)
     if n == 0:
@@ -273,45 +351,27 @@ def train(
                 f"epoch {epoch:02d} lr={epoch_lr:.5f} "
                 f"train_loss={train_loss:.4f} train_exact={train_exact:.4f} train_bit={train_bit:.4f}"
             )
+        if on_epoch is not None:
+            metrics = {
+                "epoch": epoch, "learning_rate": epoch_lr,
+                "train": {"loss": train_loss, "exact_mask_accuracy": train_exact,
+                          "bit_accuracy": train_bit},
+                "validation": ({"loss": val_loss, "exact_mask_accuracy": val_exact,
+                                "bit_accuracy": val_bit} if X_val else None),
+            }
+            on_epoch(metrics, (W1, b1, W2, b2, W3, b3))
 
     return W1, b1, W2, b2, W3, b3
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train tiny ML hold model from videopoker JSONL training data.")
-    parser.add_argument("input_jsonl")
-    parser.add_argument("output_model_json")
-    parser.add_argument("--hidden", type=int, default=64)
-    parser.add_argument("--hidden2", type=int, default=32)
-    parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--lr", type=float, default=0.01)
-    parser.add_argument("--validation-split", type=float, default=0.1)
-    parser.add_argument("--l2", type=float, default=1e-6)
-    parser.add_argument("--seed", type=int, default=12345)
-    parser.add_argument("--max-samples", type=int, default=None)
-    args = parser.parse_args()
-
-    X, y = load_dataset(args.input_jsonl, max_samples=args.max_samples)
-    print(f"loaded samples={len(X)} features={len(X[0])}")
-
-    W1, b1, W2, b2, W3, b3 = train(
-        X,
-        y,
-        hidden=args.hidden,
-        hidden2=args.hidden2,
-        epochs=args.epochs,
-        lr=args.lr,
-        seed=args.seed,
-        validation_split=args.validation_split,
-        l2=args.l2,
-    )
-
-    model = {
+def export_model(weights):
+    W1, b1, W2, b2, W3, b3 = weights
+    return {
         "format": "videopoker-ml-v3",
-        "input_size": len(X[0]),
-        "hidden1_size": args.hidden,
-        "hidden2_size": args.hidden2,
-        "output_size": 5,
+        "input_size": len(W1[0]),
+        "hidden1_size": len(b1),
+        "hidden2_size": len(b2),
+        "output_size": len(b3),
         "W1": W1,
         "b1": b1,
         "W2": W2,
@@ -320,10 +380,123 @@ def main():
         "b3": b3,
     }
 
-    with open(args.output_model_json, "w", encoding="utf-8") as f:
-        json.dump(model, f)
 
-    print(f"saved model to {args.output_model_json}")
+def write_json(path, value, *, indent=None):
+    temporary = path.with_suffix(".tmp")
+    with temporary.open("w", encoding="utf-8") as stream:
+        json.dump(value, stream, indent=indent, allow_nan=False)
+    temporary.replace(path)
+
+
+def run_fixed_training(args, config):
+    directory = args.run_dir
+    if directory.exists():
+        raise ValueError("Run directory must be new to preserve existing artifacts")
+    (X, y), validation, provenance = load_fixed_data(
+        args.manifest, args.validation_data, args.max_samples, args.max_validation_samples)
+    directory.mkdir(parents=True, exist_ok=False)
+    checkpoint_dir = directory / "checkpoints"
+    checkpoint_dir.mkdir()
+    record_path = directory / "run.json"
+    record = {
+        "run_version": 1, "status": "in_progress", "dataset": provenance,
+        "runtime": {"python": platform.python_version(),
+                    "implementation": platform.python_implementation(),
+                    "system": platform.system(), "machine": platform.machine()},
+        "code_sha256": {"train_ml_engine.py": sha256(__file__),
+                        "ml_data.py": sha256(ml_data.__file__)},
+        "configuration": {
+            **config, "input_size": len(X[0]), "output_size": len(y[0]),
+            "loss": "binary_cross_entropy", "optimizer": "per_sample_sgd_with_l2",
+            "learning_rate_decay": 0.98, "augmentation": "position_shuffle_preserving_summary",
+            "max_samples": args.max_samples, "max_validation_samples": args.max_validation_samples,
+        },
+        "epochs": [],
+    }
+    write_json(record_path, record, indent=2)
+
+    def save_epoch(metrics, weights):
+        checkpoint = checkpoint_dir / f"epoch-{metrics['epoch']:03d}.json"
+        write_json(checkpoint, export_model(weights))
+        record["epochs"].append({**metrics, "checkpoint": {
+            "path": checkpoint.relative_to(directory).as_posix(), "sha256": sha256(checkpoint),
+        }})
+        write_json(record_path, record, indent=2)
+
+    print(f"loaded train={len(X)} validation={len(validation[0])} features={len(X[0])}")
+    train(X, y, **config, validation_data=validation, on_epoch=save_epoch)
+    candidate = directory / f"candidate-{provenance['variant']}.json"
+    last = record["epochs"][-1]["checkpoint"]
+    temporary = candidate.with_suffix(".tmp")
+    shutil.copyfile(directory / last["path"], temporary)
+    temporary.replace(candidate)
+    record["candidate"] = {"path": candidate.name, "sha256": sha256(candidate),
+                           "epoch": config["epochs"]}
+    record["status"] = "complete"
+    write_json(record_path, record, indent=2)
+    print(f"saved final-epoch candidate to {candidate}")
+    print(f"saved run record to {record_path}")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Train an ML hold model from videopoker JSONL data.")
+    parser.add_argument("input_jsonl", nargs="?")
+    parser.add_argument("output_model_json", nargs="?")
+    parser.add_argument("--manifest", type=Path, help="Preparation manifest for fixed partitions")
+    parser.add_argument("--validation-data", type=Path,
+                        help="Path to the manifest's validation JSONL if stored separately")
+    parser.add_argument("--run-dir", type=Path, help="New directory for checkpoints and candidate")
+    parser.add_argument("--hidden", type=int, help="First layer width (manifest: 128, legacy: 64)")
+    parser.add_argument("--hidden2", type=int, help="Second layer width (manifest: 64, legacy: 32)")
+    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--lr", type=float, default=0.01)
+    parser.add_argument("--validation-split", type=float, help="Legacy split fraction (default: 0.1)")
+    parser.add_argument("--l2", type=float, default=1e-6)
+    parser.add_argument("--seed", type=int, default=12345)
+    parser.add_argument("--max-samples", type=int, help="Use at most this many input rows")
+    parser.add_argument("--max-validation-samples", type=int,
+                        help="Use a fixed validation prefix for a small manifest run")
+    args = parser.parse_args(argv)
+    if args.manifest:
+        if not args.run_dir or args.input_jsonl or args.output_model_json:
+            parser.error("--manifest requires --run-dir and replaces the positional input and output")
+        if args.validation_split is not None:
+            parser.error("--validation-split cannot be used with fixed manifest partitions")
+        hidden_defaults = (128, 64)
+    else:
+        if not args.input_jsonl or not args.output_model_json:
+            parser.error("provide both input_jsonl and output_model_json, or use --manifest")
+        if any(value is not None for value in
+               (args.run_dir, args.validation_data, args.max_validation_samples)):
+            parser.error("--run-dir, --validation-data and --max-validation-samples require --manifest")
+        hidden_defaults = (64, 32)
+    config = {
+        "hidden": args.hidden if args.hidden is not None else hidden_defaults[0],
+        "hidden2": args.hidden2 if args.hidden2 is not None else hidden_defaults[1],
+        "epochs": args.epochs, "lr": args.lr, "seed": args.seed, "l2": args.l2,
+    }
+    for name, value in (("hidden", config["hidden"]), ("hidden2", config["hidden2"]),
+                        ("epochs", args.epochs), ("max-samples", args.max_samples),
+                        ("max-validation-samples", args.max_validation_samples)):
+        if value is not None and value <= 0:
+            parser.error(f"--{name} must be positive")
+    if not math.isfinite(args.lr) or args.lr <= 0 or not math.isfinite(args.l2) or args.l2 < 0:
+        parser.error("--lr must be finite and positive and --l2 must be finite and nonnegative")
+    if args.validation_split is not None and not 0 <= args.validation_split <= 1:
+        parser.error("--validation-split must be between 0 and 1")
+    try:
+        if args.manifest:
+            run_fixed_training(args, config)
+        else:
+            X, y = load_dataset(args.input_jsonl, max_samples=args.max_samples)
+            print(f"loaded samples={len(X)} features={len(X[0])}")
+            split = 0.1 if args.validation_split is None else args.validation_split
+            weights = train(X, y, **config, validation_split=split)
+            with open(args.output_model_json, "w", encoding="utf-8") as stream:
+                json.dump(export_model(weights), stream)
+            print(f"saved model to {args.output_model_json}")
+    except (OSError, ValueError, KeyError, TypeError, OverflowError) as error:
+        parser.exit(1, f"train_ml_engine: {error}\n")
 
 
 if __name__ == "__main__":
