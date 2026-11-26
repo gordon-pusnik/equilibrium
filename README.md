@@ -17,10 +17,10 @@ Equilibrium is a multi-platform video poker trainer and analysis suite built aro
 - Two supported game variants:
   - `jacks_or_better_9_6`
   - `jacks_or_better_8_5`
-- Three autohold engines:
-  - `solver`: exhaustive EV search over all 32 hold masks
+- Three strategy engines in the shared core:
+  - `solver`: exhaustive EV search over all 32 hold masks; authoritative for mobile trainer autohold and coaching
   - `rule`: handcrafted strategy table
-  - `ml`: local JSON neural-network inference
+  - `ml`: experimental local JSON neural-network inference
 - RTP verification tool for comparing engines against optimal play
 - Training-data export and Python ML trainer
 - Android app with Compose + JNI bridge
@@ -30,10 +30,10 @@ Equilibrium is a multi-platform video poker trainer and analysis suite built aro
 
 ## Supported Variants
 
-| Variant ID | Display Name | Optimal RTP |
+| Variant ID | Display Name | Exact optimal RTP at five credits |
 | --- | --- | --- |
-| `jacks_or_better_9_6` | Jacks or Better 9/6 | `99.5439%` |
-| `jacks_or_better_8_5` | Jacks or Better 8/5 | `97.2985%` |
+| `jacks_or_better_9_6` | Jacks or Better 9/6 | `99.543904%` |
+| `jacks_or_better_8_5` | Jacks or Better 8/5 | `97.298434%` |
 
 The current paytable difference is the standard 9/6 vs 8/5 change:
 
@@ -144,6 +144,8 @@ The tool prints per-run RTP, an overall estimate, a 95% confidence interval, the
 
 ## ML Workflow
 
+This workflow trains and benchmarks the JSON models supported by the native `ml` engine. The newer whole-mask ranker and reranker were evaluated separately offline; see [ML research results](#ml-research-results).
+
 Generate solver training data:
 
 ```bash
@@ -197,7 +199,7 @@ To simulate return for the smoke model:
   100000 3 5 12345
 ```
 
-The mobile apps currently bundle variant-specific ML models:
+The mobile apps currently bundle these earlier variant-specific JSON models, not the offline ranker and reranker:
 
 - `ml/modeljob96.json` for `jacks_or_better_9_6`
 - `ml/modeljob85.json` for `jacks_or_better_8_5`
@@ -387,9 +389,18 @@ Current iOS features:
 - solver EV comparison details
 - mistake severity feedback for player-selected holds
 
-## Notes On ML Quality
+## ML Research Results
 
-The ML engine is in place for experimentation, CLI evaluation, and future product work, but it is currently weaker than the rule and solver engines. Use `verify_rtp` to measure the gap for a specific model and variant before treating it as production-quality strategy.
+The best tested standalone recipe scores all 32 holds with a learned whole-mask ranker, then uses one learned reranker to reconsider the top two holds on high-card hands. It makes decisions without calling the solver at inference.
+
+| Paytable | Exact EV solver RTP | Best offline model RTP | Gap to solver |
+| --- | ---: | ---: | ---: |
+| Jacks or Better 9/6 | 99.543904% | **99.542950%** | 0.000955 pp |
+| Jacks or Better 8/5 | 97.298434% | **97.297236%** | 0.001198 pp |
+
+These are expected returns at **five credits**, not simulated payouts. Model results come from five-fold out-of-fold predictions weighted across all 2,598,960 unordered deals; they measure the training recipe, not a deployed checkpoint. Gaps are in percentage points and are calculated before rounding. See [Milestone 3 and final RTP results](MILESTONES.md#final-rtp-results-at-five-credits).
+
+The offline models are not integrated into the native `ml` engine or mobile apps. The exact solver remains authoritative for MVP autohold and coaching. The API strategy endpoint still defaults to `solver` and accepts `rule` or `ml` when explicitly requested.
 
 ## Windows Desktop App
 
