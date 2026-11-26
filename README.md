@@ -431,6 +431,8 @@ The CLI-only [`ml-rerank` engine](#experimental-ml-rerank-engine) uses exported 
 
 Gordon Pusnik
 
-## License
+## Licence
 
-© 2026 Gordon Pusnik. All rights reserved.
+Copyright 2026 Gordon Pusnik and contributors.
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
