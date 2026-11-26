@@ -96,7 +96,7 @@ Usage:
 
 ```bash
 ./build/videopoker \
-  [--engine solver|rule|ml] \
+  [--engine solver|rule|ml|ml-rerank] \
   [--variant jacks_or_better_9_6|jacks_or_better_8_5] \
   [--ml-model /abs/path/to/model.json] \
   [--print-strategy] \
@@ -108,7 +108,7 @@ Notes:
 
 - `solver` is the default engine
 - `jacks_or_better_9_6` is the default variant
-- `--ml-model` is required when `--engine ml`
+- `--ml-model` is required for `ml` and `ml-rerank`; their bundle formats are not interchangeable
 - `--dump-training` writes JSONL rows using the holds of the selected engine; use `--engine solver` for authoritative training labels
 
 Examples:
@@ -126,7 +126,7 @@ Usage:
 
 ```bash
 ./build/verify_rtp \
-  [--engine solver|rule|ml] \
+  [--engine solver|rule|ml|ml-rerank] \
   [--variant jacks_or_better_9_6|jacks_or_better_8_5] \
   [--ml-model /abs/path/to/model.json] \
   hands_per_run runs [bet=5] [seed=12345]
@@ -141,6 +141,27 @@ Examples:
 ```
 
 The tool prints per-run RTP, an overall estimate, a 95% confidence interval, the target RTP for the selected variant, and the delta to target.
+
+### Experimental `ml-rerank` engine
+
+The CLI-only ranker and reranker run natively without Python or PyTorch. Bundles are paytable-specific and support **five credits only**. Use `ml/rerank-job96.json` for 9/6 or `ml/rerank-job85.json` for 8/5.
+
+```bash
+./build/videopoker --engine ml-rerank --variant jacks_or_better_9_6 \
+  --ml-model ml/rerank-job96.json 100 5 10
+
+./build/verify_rtp --engine ml-rerank --variant jacks_or_better_8_5 \
+  --ml-model ml/rerank-job85.json 100000 3 5 12345
+```
+
+`verify_rtp` simulates draws, so its sampling error is much larger than the small research gaps below. For exact EV on specific deals, pass five ordered deck IDs per line to `build/benchmark_ml`:
+
+```bash
+printf '0 17 21 35 51\n' | ./build/benchmark_ml --engine ml-rerank \
+  --variant jacks_or_better_9_6 --ml-model ml/rerank-job96.json
+```
+
+The output columns are model mask, solver mask, solver EV, model EV, and initial hand category. The checked-in bundles are fold-0 exports from the [9/6 grouped evaluation](MILESTONES.md#experiment-6-deal-weighted-nested-cross-validation) and the [8/5 replication](MILESTONES.md#experiment-7-conservative-85-reranker-flips). To export a different selected fold, use `poker-core/python/export_rerank_model.py --help`.
 
 ## ML Workflow
 
@@ -400,7 +421,7 @@ The best tested standalone recipe scores all 32 holds with a learned whole-mask 
 
 These are expected returns at **five credits**, not simulated payouts. Model results come from five-fold out-of-fold predictions weighted across all 2,598,960 unordered deals; they measure the training recipe, not a deployed checkpoint. Gaps are in percentage points and are calculated before rounding. See [Milestone 3 and final RTP results](MILESTONES.md#final-rtp-results-at-five-credits).
 
-The offline models are not integrated into the native `ml` engine or mobile apps. The exact solver remains authoritative for MVP autohold and coaching. The API strategy endpoint still defaults to `solver` and accepts `rule` or `ml` when explicitly requested.
+The CLI-only [`ml-rerank` engine](#experimental-ml-rerank-engine) uses exported research checkpoints; it does not replace the native `ml` engine or run in the mobile apps or API. The exact solver remains authoritative for MVP autohold and coaching. The API strategy endpoint still defaults to `solver` and accepts `rule` or `ml` when explicitly requested.
 
 ## Windows Desktop App
 

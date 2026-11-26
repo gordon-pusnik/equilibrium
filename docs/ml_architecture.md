@@ -28,7 +28,9 @@ The solver evaluates all 32 hold masks. Clients consume native hold masks and EV
 
 ## 2. Experimental ML Research Pipeline
 
-Training examples originate in the C++ CLI, not in the Python trainer. The CLI's `--dump-training` option exports the selected engine's holds. Use `--engine solver` explicitly when generating authoritative training labels. Rule- or ML-generated labels are not equivalent to optimal solver labels.
+This section and Section 3 describe the original `--engine ml` model family. The newer whole-mask ranker and reranker are described in [Section 9](#9-cli-only-whole-mask-ranker-and-reranker).
+
+For the original model family, training examples originate in the C++ CLI, not in the Python trainer. The CLI's `--dump-training` option exports the selected engine's holds. Use `--engine solver` explicitly when generating authoritative training labels. Rule- or ML-generated labels are not equivalent to optimal solver labels.
 
 ```mermaid
 flowchart TD
@@ -116,14 +118,14 @@ Model accuracy and RTP must be measured for the intended variant before making q
 
 ### Reference measurements
 
-Reproduce the current state with:
+Reproduce the original `modeljob96` baseline with:
 
 ```bash
 bash ./build.sh
 ./build/verify_rtp --engine ml --ml-model ml/modeljob96.json --variant jacks_or_better_9_6 200000 3 5 12345
 ```
 
-Observed: 93.72% RTP (95% CI 92.78–94.67%) against the solver's 99.54% theoretical return, so the current ML engine gives up roughly 5.8 percentage points. Exact-mask agreement with the exported labels, measured on the first 2,000 rows of each source dataset: `modeljob96` 90.4% (97.4% per bit), `modeljob85` 90.2% (97.1% per bit), `modelv3` 94.9% (98.5% per bit). These are in-sample figures against training rows, not held-out validation results.
+Observed: 93.72% RTP (95% CI 92.78–94.67%) against the solver's 99.54% theoretical return, so this baseline gives up roughly 5.8 percentage points. Exact-mask agreement with the exported labels, measured on the first 2,000 rows of each source dataset: `modeljob96` 90.4% (97.4% per bit), `modeljob85` 90.2% (97.1% per bit), `modelv3` 94.9% (98.5% per bit). These are in-sample figures against training rows, not held-out validation results.
 
 Dataset provenance is uneven: `ml/trainingjob85.jsonl` and `ml/trainingjob96.jsonl` carry both `engine` and `variant`, while `ml/training1.jsonl` and `ml/training2.jsonl` carry `engine` but no `variant`, so models trained on them cannot be traced to a paytable from the data itself.
 
@@ -132,13 +134,14 @@ Dataset provenance is uneven: `ml/trainingjob85.jsonl` and `ml/trainingjob96.jso
 | Layer | Observed implementation | MVP constraint |
 | --- | --- | --- |
 | Shared C++ core | Supports solver, rule and ML engine selection; exposes solver analysis through `trainer_api.cpp` | Solver alone determines MVP best play and autohold |
+| C++ CLI tools | `CliHoldPolicy` adds the separate `ml-rerank` option | Not registered with `AutoHold`; unavailable through the trainer API or mobile apps |
 | Android | `MainActivity.kt` explicitly selects `solver`; JNI calls the shared trainer API | Preserve solver-only decisions and shared native logic |
 | iOS | `ContentView.swift` explicitly selects `solver`; Objective-C++ calls the shared trainer API | Preserve solver-only decisions and shared native logic |
 | FastAPI coaching | `api-server/app/native.py` selects `solver` for its solver handles; coaching services derive deterministic output from native facts | Coaching remains secondary and cannot override holds |
 | FastAPI strategy | `/v1/video-poker/strategy` defaults to solver but currently accepts `rule` and `ml` | Solver-only MVP service enforcement remains a separate implementation task |
 | C# desktop client | `csharp-app/Program.cs` posts to `/v1/video-poker/strategy` with `engine` defaulting to `solver` and an optional `model_path` | Inherits the same strategy-route enforcement gap as FastAPI |
 
-Engine selection is currently global in `autohold.cpp`, even when accessed through trainer handles. A solver handle does not establish per-handle engine isolation. Service enforcement and concurrent engine use require explicit review rather than assuming request-local isolation.
+Engine selection for `solver`, `rule`, and `ml` is currently global in `autohold.cpp`, even when accessed through trainer handles. A solver handle does not establish per-handle engine isolation. Service enforcement and concurrent engine use require explicit review rather than assuming request-local isolation.
 
 ML artefacts are present in the repository but are not activated in the MVP decision path: `ml/modeljob96.json` and `ml/modeljob85.json` are bundled as Android assets and iOS resources, `api-server/Dockerfile` copies them into the API container, and the Android `nativeSetMlModel` and iOS `loadMlModel` bridge functions are never called by app code. Bundling a model is not the same as using it.
 
@@ -422,3 +425,35 @@ The approximate 95% interval uses the standard error of paired hand
 differences. Validation results are for selection and can be optimistic after
 choosing a checkpoint on the same cohort. Reserve the final test cohort for
 evaluating the selected checkpoint against the shipped model.
+
+## 9. CLI-only whole-mask ranker and reranker
+
+`--engine ml-rerank` is a separate native inference path in `poker-core/c++/cli_hold_policy.cpp`. Unlike the five-logit `ml` model, it uses one shared network to score each of the 32 possible holds, then uses a second network to decide whether to switch to the runner-up on a high-card hand.
+
+```mermaid
+flowchart TD
+    D["Five dealt cards"]
+    C["Canonicalize suit names and card order"]
+    F["Encode 103 features for each of 32 holds"]
+    R["Shared ranker: 103 → 64 → 64 → 1 score per hold"]
+    T["Select the top two holds by score"]
+    G{"High-card hand and score gap within the bundle limit?"}
+    P["Pair inputs: both feature vectors, their difference, and both scores"]
+    N["Reranker: 311 → 64 → 32 → 1 predicted EV gain"]
+    E{"Predicted gain exceeds the bundle threshold?"}
+    K["Keep the top-ranked hold"]
+    S["Switch to the runner-up"]
+    O["Map the selected mask back to dealt card positions"]
+
+    D --> C --> F --> R --> T --> G
+    G -->|Yes| P --> N --> E
+    G -->|No| K
+    E -->|No| K
+    E -->|Yes| S
+    K --> O
+    S --> O
+```
+
+- **Hold features:** kept and discarded rank counts, straight windows, suit summaries, suited ranks, blockers, and one-card outs. Both networks use ReLU hidden layers. The ranker's output is a score, not a credit EV; the reranker's output estimates the signed EV gain in credits from switching.
+- **Training and evaluation:** the ranker learns from exact solver EVs for all 32 holds. The reranker learns from top-two predictions made out of fold by shadow rankers. Checkpoint and flip thresholds are selected on validation. Inference itself does not call the solver. See [Milestone 3](../MILESTONES.md#final-rtp-results-at-five-credits) for deal-weighted cross-validation results.
+- **Export and scope:** `poker-core/python/export_rerank_model.py` exports checkpoints and thresholds in an `equilibrium-ml-rerank-v1` JSON bundle. `ml/rerank-job96.json` and `ml/rerank-job85.json` are each tied to one paytable and a five-credit bet. Export requires PyTorch; the native CLI does not. `videopoker` and `verify_rtp` use the bundles for play and simulation; `benchmark_ml` can separately score their selected holds with the exact solver. See the [CLI examples](../README.md#experimental-ml-rerank-engine).

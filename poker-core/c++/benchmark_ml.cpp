@@ -9,6 +9,7 @@
 
 #include "autohold.h"
 #include "card.h"
+#include "cli_hold_policy.h"
 #include "evaluator.h"
 #include "game_variant.h"
 
@@ -17,8 +18,10 @@ int main(int argc, char* argv[]) {
         std::string model, engine = "ml";
         GameVariant variant = GameVariant::JACKS_OR_BETTER_9_6;
         uint32_t bet = 5;
+        bool masks_only = false;
         for (int i = 1; i < argc; ++i) {
             const std::string arg = argv[i];
+            if (arg == "--masks-only") { masks_only = true; continue; }
             if (i + 1 >= argc) throw std::runtime_error("Missing value for " + arg);
             const std::string value = argv[++i];
             if (arg == "--ml-model") model = value;
@@ -30,12 +33,12 @@ int main(int argc, char* argv[]) {
                 bet = static_cast<uint32_t>(value[0] - '0');
             } else throw std::runtime_error("Unknown argument: " + arg);
         }
-        if (engine != "ml" && engine != "solver") throw std::runtime_error("Engine must be ml or solver");
-        if (engine == "ml" && (model.empty() || !AutoHold::set_ml_model(model.c_str()))) {
-            throw std::runtime_error("Failed to load ML model: " + model);
+        if (engine != "ml" && engine != "ml-rerank" && engine != "solver") {
+            throw std::runtime_error("Engine must be ml, ml-rerank or solver");
         }
-        if (engine == "solver" && !model.empty()) throw std::runtime_error("Solver does not take an ML model");
-        AutoHold::set_engine(engine.c_str());
+        CliHoldPolicy policy;
+        std::string error;
+        if (!policy.configure(engine, model, variant, bet, error)) throw std::runtime_error(error);
         AutoHold::set_verbose(false);
         std::cout << std::setprecision(17);
         std::string line;
@@ -59,7 +62,11 @@ int main(int argc, char* argv[]) {
                 Card(ids[4] / 13 + 1, ids[4] % 13 + 2)
             };
             std::array<Card*, 5> ptrs = {&cards[0], &cards[1], &cards[2], &cards[3], &cards[4]};
-            const uint32_t mask = AutoHold::auto_hold(ptrs, bet, variant);
+            const uint32_t mask = policy.hold(ptrs);
+            if (masks_only) {
+                std::cout << mask << '\n';
+                continue;
+            }
             AutoHold::MistakeAnalysis analysis;
             if (!AutoHold::analyze_player_hold(ptrs, bet, variant, mask, analysis) ||
                 !std::isfinite(analysis.best_ev) || !std::isfinite(analysis.player_ev)) {

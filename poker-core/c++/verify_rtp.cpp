@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "autohold.h"
+#include "cli_hold_policy.h"
 #include "card.h"
 #include "game_variant.h"
 #include "hand.h"
@@ -98,7 +99,7 @@ int main(int argc, char* argv[]) {
         const std::string arg = argv[i];
         if (arg == "--engine") {
             if (i + 1 >= argc) {
-                std::cout << "Error - --engine requires value: solver|rule|ml" << std::endl;
+                std::cout << "Error - --engine requires value: solver|rule|ml|ml-rerank" << std::endl;
                 return 1;
             }
             engine = argv[++i];
@@ -123,30 +124,10 @@ int main(int argc, char* argv[]) {
     }
 
     if (positional.size() < 2 || positional.size() > 4) {
-        std::cout << "Usage: verify_rtp [--engine solver|rule|ml] [--variant jacks_or_better_9_6|jacks_or_better_8_5] [--ml-model model.json] hands_per_run runs [bet=5] [seed=12345]" << std::endl;
+        std::cout << "Usage: verify_rtp [--engine solver|rule|ml|ml-rerank] [--variant jacks_or_better_9_6|jacks_or_better_8_5] [--ml-model model.json] hands_per_run runs [bet=5] [seed=12345]" << std::endl;
         return 1;
     }
 
-    if (!AutoHold::set_engine(engine.c_str())) {
-        std::cout << "Error - invalid engine: " << engine << " (expected solver|rule|ml)" << std::endl;
-        return 1;
-    }
-
-    if (engine == "ml") {
-        if (ml_model_path.empty()) {
-            std::cout << "Error - engine ml requires --ml-model <path>" << std::endl;
-            return 1;
-        }
-        if (!AutoHold::set_ml_model(ml_model_path.c_str())) {
-            std::cout << "Error - failed to load ml model from: " << ml_model_path << std::endl;
-            return 1;
-        }
-    }
-
-    if (engine != "ml" && !ml_model_path.empty()) {
-        std::cout << "Error - --ml-model can only be used with --engine ml" << std::endl;
-        return 1;
-    }
 
     const uint64_t hands_per_run = std::strtoull(positional[0].c_str(), nullptr, 10);
     const uint32_t runs = static_cast<uint32_t>(std::strtoul(positional[1].c_str(), nullptr, 10));
@@ -155,6 +136,13 @@ int main(int argc, char* argv[]) {
 
     if (hands_per_run == 0 || runs == 0 || bet == 0 || bet > 5) {
         std::cout << "Invalid args: hands_per_run>0, runs>0, 1<=bet<=5 required." << std::endl;
+        return 1;
+    }
+
+    CliHoldPolicy policy;
+    std::string policy_error;
+    if (!policy.configure(engine, ml_model_path, variant, bet, policy_error)) {
+        std::cout << "Error - " << policy_error << std::endl;
         return 1;
     }
 
@@ -185,7 +173,7 @@ int main(int argc, char* argv[]) {
             };
 
             std::array<Card*, 5> card_ptrs = {&cards[0], &cards[1], &cards[2], &cards[3], &cards[4]};
-            AutoHold::auto_hold(card_ptrs, bet, variant);
+            policy.hold(card_ptrs);
 
             std::array<SimCard, 5> final_cards = {
                 SimCard{static_cast<uint8_t>(cards[0].suit()), static_cast<uint8_t>(cards[0].rank())},

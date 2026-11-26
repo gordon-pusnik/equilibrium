@@ -14,6 +14,7 @@
 #include "autohold.h"
 #include "card.h"
 #include "checkforwin.h"
+#include "cli_hold_policy.h"
 #include "deck.h"
 #include "game_variant.h"
 #include "hand.h"
@@ -30,7 +31,7 @@ int main(int argc, char *argv[]) {
         const std::string arg = argv[i];
         if (arg == "--engine") {
             if (i + 1 >= argc) {
-                std::cout << "Error - --engine requires value: solver|rule|ml" << std::endl;
+                std::cout << "Error - --engine requires value: solver|rule|ml|ml-rerank" << std::endl;
                 return 1;
             }
             engine_name = argv[++i];
@@ -62,29 +63,16 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (positional.size() != 3 && positional.size() != 0) {
-        std::cout << "Error - usage: main [--engine solver|rule|ml] [--variant jacks_or_better_9_6|jacks_or_better_8_5] [--ml-model model.json] [--print-strategy] [--dump-training path.jsonl] [coins bet iterations]" << std::endl;
+    if (positional.size() != 3 && !(print_strategy && positional.empty())) {
+        std::cout << "Error - usage: videopoker [--engine solver|rule|ml|ml-rerank] [--variant jacks_or_better_9_6|jacks_or_better_8_5] [--ml-model model.json] [--print-strategy] [--dump-training path.jsonl] [coins bet iterations]" << std::endl;
         return 1;
     }
 
-    if (!AutoHold::set_engine(engine_name.c_str())) {
-        std::cout << "Error - invalid engine: " << engine_name << " (expected solver|rule|ml)" << std::endl;
-        return 1;
-    }
-
-    if (engine_name == "ml") {
-        if (ml_model_path.empty()) {
-            std::cout << "Error - engine ml requires --ml-model <path>" << std::endl;
-            return 1;
-        }
-        if (!AutoHold::set_ml_model(ml_model_path.c_str())) {
-            std::cout << "Error - failed to load ml model from: " << ml_model_path << std::endl;
-            return 1;
-        }
-    }
-
-    if (engine_name != "ml" && !ml_model_path.empty()) {
-        std::cout << "Error - --ml-model can only be used with --engine ml" << std::endl;
+    const uint32_t bet = positional.empty() ? 5 : atoi(positional[1].c_str());
+    CliHoldPolicy policy;
+    std::string policy_error;
+    if (!policy.configure(engine_name, ml_model_path, variant, bet, policy_error)) {
+        std::cout << "Error - " << policy_error << std::endl;
         return 1;
     }
 
@@ -97,14 +85,8 @@ int main(int argc, char *argv[]) {
         std::cout << std::endl;
     }
 
-    if (positional.size() != 3) {
-        std::cout << "Error - usage: main [--engine solver|rule|ml] [--variant jacks_or_better_9_6|jacks_or_better_8_5] [--ml-model model.json] [--print-strategy] [--dump-training path.jsonl] [coins bet iterations]" << std::endl;
-        return 1;
-    }
-
     const GameVariantInfo& variant_info = game_variant_info(variant);
     uint32_t coins = atoi(positional[0].c_str());
-    uint32_t bet = atoi(positional[1].c_str());
     uint32_t iterations = atoi(positional[2].c_str());
     std::cout << "Running " << coins << " coins with a bet of " << bet
               << " for " << iterations << " iterations"
@@ -146,7 +128,7 @@ int main(int argc, char *argv[]) {
 
                     deck->shuffle();
                     deck->new_hand();
-                    deck->hand()->auto_hold(bet, variant);
+                    policy.hold(deck->hand()->cards());
 
                     auto initial_cards_ptr = deck->hand()->cards();
                     uint32_t hold_mask = 0;
@@ -213,7 +195,7 @@ int main(int argc, char *argv[]) {
         coins -= bet;
         deck->shuffle();
         deck->new_hand();
-        deck->hand()->auto_hold(bet, variant);
+        policy.hold(deck->hand()->cards());
         deck->hand()->to_console();
         
         deck->draw_cards();
