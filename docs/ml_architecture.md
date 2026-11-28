@@ -151,10 +151,15 @@ These are source observations and product constraints, not confirmation that bui
 
 ## 5. Solver-backed ML EV-regret benchmark
 
-The benchmark measures the expected return lost by the existing native ML policy on
-initial hands. It does not retrain models or change MVP decisions. The Python driver
-handles sampling, exclusions, provenance and JSON output; `build/benchmark_ml` is its
-sequential C++ scoring worker. Scoring calls native ML inference followed by
+This workflow measures the expected return lost by the original `--engine ml`
+policy on initial hands. It does not retrain models or change MVP decisions.
+The Python driver, `poker-core/python/benchmark_ml.py`, handles sampling,
+exclusions, replay, provenance and JSON output. It invokes the native scoring
+worker, `build/benchmark_ml`, with its default `ml` engine. The driver does not
+expose `--engine` and rejects the newer array-format `ml-rerank` bundles. For
+those bundles, [invoke the native scorer directly](#exact-ev-scoring-for-ml-rerank).
+
+Scoring calls native ML inference followed by
 `AutoHold::analyze_player_hold`, so both the best hold and the model-selected hold
 are valued by the shared exhaustive solver. No replacement cards are sampled.
 Do not use the ML branch's `auto_hold(..., out_ev)` for this measurement: that
@@ -401,6 +406,9 @@ available for experiments that use its internal row split.
 
 ## 8. Checkpoint selection and paired EV comparison
 
+This JSON replay and comparison workflow is for the original `ml` models.
+For `ml-rerank`, see [native exact EV scoring](#exact-ev-scoring-for-ml-rerank).
+
 Save one ordered validation cohort in benchmark replay format and use it for
 every shortlisted checkpoint and the shipped baseline. Preserve the cohort,
 benchmark reports, source partition hash, and sampling settings. Select the
@@ -456,4 +464,26 @@ flowchart TD
 
 - **Hold features:** kept and discarded rank counts, straight windows, suit summaries, suited ranks, blockers, and one-card outs. Both networks use ReLU hidden layers. The ranker's output is a score, not a credit EV; the reranker's output estimates the signed EV gain in credits from switching.
 - **Training and evaluation:** the ranker learns from exact solver EVs for all 32 holds. The reranker learns from top-two predictions made out of fold by shadow rankers. Checkpoint and flip thresholds are selected on validation. Inference itself does not call the solver. See [Milestone 3](../MILESTONES.md#final-rtp-results-at-five-credits) for deal-weighted cross-validation results.
-- **Export and scope:** `poker-core/python/export_rerank_model.py` exports checkpoints and thresholds in an `equilibrium-ml-rerank-v1` JSON bundle. `ml/rerank-job96.json` and `ml/rerank-job85.json` are each tied to one paytable and a five-credit bet. Export requires PyTorch; the native CLI does not. `videopoker` and `verify_rtp` use the bundles for play and simulation; `benchmark_ml` can separately score their selected holds with the exact solver. See the [CLI examples](../README.md#experimental-ml-rerank-engine).
+- **Export and scope:** `poker-core/python/export_rerank_model.py` exports checkpoints and thresholds in an `equilibrium-ml-rerank-v1` JSON bundle. `ml/rerank-job96.json` and `ml/rerank-job85.json` are each tied to one paytable and a five-credit bet. Export requires PyTorch; the native CLI does not. `videopoker` and `verify_rtp` use the bundles for play and simulation. See the [CLI examples](../README.md#experimental-ml-rerank-engine).
+
+### Exact EV scoring for `ml-rerank`
+
+After building with `bash ./build.sh`, run the native `build/benchmark_ml`
+worker directly, not the Python driver from Section 5:
+
+```bash
+printf '%s\n' '0 14 28 42 4' | ./build/benchmark_ml \
+  --engine ml-rerank --ml-model ml/rerank-job96.json \
+  --variant jacks_or_better_9_6 --bet 5
+```
+
+Standard input takes one ordered hand per line: five distinct deck IDs from
+0 to 51, separated by whitespace. For 8/5, use `ml/rerank-job85.json` and
+`--variant jacks_or_better_8_5`; the bet must still be 5. The native worker
+outputs one tab-separated row per hand: model mask, solver-best mask,
+solver-best EV, model-hold EV, and initial hand category. The solver is used
+here to score the selected hold, not to choose it.
+
+For a paired comparison with the original `ml` engine, feed the same ordered
+deck IDs to both native runs. The worker does not sample hands or produce the
+JSON replay and comparison reports used in Sections 5 and 8.
